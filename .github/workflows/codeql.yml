@@ -15,7 +15,7 @@ jobs:
   analyze:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: github/codeql-action/init@v3
         with:
           languages: go
@@ -24,5 +24,6 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go build -mod=vendor ./cmd/mapftpdrive
+        env:
+          CGO_ENABLED: "0"
       - uses: github/codeql-action/analyze@v3
-

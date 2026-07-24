@@ -19,6 +19,7 @@ New-Item -ItemType Directory -Force -Path $build, $output | Out-Null
 
 $env:GOOS = "windows"
 $env:GOARCH = $Architecture
+$env:CGO_ENABLED = "0"
 $ldflags = @(
     "-s", "-w", "-H=windowsgui",
     "-X", "mapftpdrive/internal/buildinfo.Version=$Version",
