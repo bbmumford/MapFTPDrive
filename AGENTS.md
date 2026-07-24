@@ -24,6 +24,11 @@ requiring an external `rclone.exe`.
   or SFTP.
 - Preserve GPLv3 source availability, upstream notices, and exact provenance
   whenever vendored or extracted source changes.
+- Both release installer formats are all-in-one: a clean supported Windows
+  machine must not require a separate WinFsp download or preinstallation.
+- WinFsp is a shared machine runtime. Detect an existing installation, never
+  remove it during MapFTPDrive uninstall, and never attempt a synchronous
+  nested MSI transaction.
 
 ## Architecture
 
@@ -35,6 +40,8 @@ requiring an external `rclone.exe`.
 - `internal/service`: Windows service and mount lifecycle supervision.
 - `internal/ui`: native mapping and management interface.
 - `installer`: installer definitions and packaging assets.
+- `scripts`: reproducible build, dependency verification, signing, and
+  packaging entry points.
 - `third_party`: selected WinFsp source and upstream provenance.
 - `vendor`: reproducible Go dependency closure.
 
@@ -58,6 +65,13 @@ exercise install, upgrade, repair, uninstall, user mount, elevated mount,
 logout/login restoration, service restart restoration, credential deletion,
 and occupied-drive-letter handling.
 
+Installer changes additionally require a release-workflow dry run for both
+x64 and ARM64. Smoke-test both output formats on clean Windows without
+WinFsp and on Windows with WinFsp already installed. Confirm the MSI's
+asynchronous dependency helper handles Windows Installer error 1618, WinFsp
+is usable before the first mount, repair succeeds, and uninstall leaves the
+shared WinFsp runtime installed.
+
 ## Release policy
 
 - Release only from an annotated `vMAJOR.MINOR.PATCH` tag.
@@ -65,10 +79,19 @@ and occupied-drive-letter handling.
   checksums, or provenance generation fail.
 - Never commit signing certificates. GitHub secrets may supply an encrypted
   PFX and password; unsigned artifacts must be clearly identified as such.
+- Signed artifacts use the clean base filename without a suffix. Never add
+  `-signed`; only unsigned artifacts use `-unsigned`.
 - Pin third-party Actions to reviewed major versions and external binary
   downloads to both a version and SHA-256.
+- Keep the WinFsp URL and SHA-256 in `build-installer.ps1` and
+  `build-msi.ps1` synchronized. A mismatch must fail packaging.
 - The checked-in vendor tree is authoritative for release builds. Do not run
   an implicit dependency update during packaging.
+- Dependabot may group and rebase routine minor/patch updates. rclone is
+  intentionally excluded: update it manually only after reviewing commit
+  chronology, the extracted mount adapter, the vendor delta, and
+  `third_party/rclone/UPSTREAM.md`. A stable version number is not necessarily
+  newer than the pinned pseudo-version commit.
 - Update `CHANGELOG.md`, provenance records, screenshots, and user
   documentation before a stable release.
 
@@ -79,3 +102,9 @@ extracted rclone/WinFsp code, record the upstream commit and local delta in
 the relevant `UPSTREAM.md`. Keep changes narrowly scoped so rebasing onto a
 security update remains auditable.
 
+The WinFsp runtime is distributed as its unmodified upstream MSI. Do not
+unpack and re-author its driver components into the MapFTPDrive MSI: doing so
+would compromise Windows Installer servicing and upstream signature
+boundaries. The EXE installs it synchronously; the MSI embeds it and delegates
+installation to the LocalSystem `install-dependencies` helper after the
+parent transaction releases the installer mutex.
