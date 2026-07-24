@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify formatting
+        shell: bash
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Test portable packages
+        run: go test -mod=vendor ./...
+      - name: Vet
+        run: go vet -mod=vendor ./...
+      - name: Verify vendored dependencies
+        run: go mod verify
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test native Windows build
+        if: matrix.arch == 'amd64'
+        run: go test -mod=vendor ./...
+      - name: Compile
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "${{ matrix.arch }}"
+          go build -mod=vendor -trimpath -o "build/MapFTPDrive-${{ matrix.arch }}.exe" ./cmd/mapftpdrive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: build/MapFTPDrive-${{ matrix.arch }}.exe
+

@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version used for a dry-run installer build
+        required: true
+        default: 0.0.0-dev
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    name: Installer ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: dotnet tool install --global wix --version 6.0.2
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.event_name }}" -eq "push") {
+            "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            "${{ inputs.version }}"
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - name: Build and package
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: >
+          ./scripts/build-installer.ps1
+          -Architecture "${{ matrix.arch }}"
+          -Version "${{ steps.version.outputs.value }}"
+          -Commit "${{ github.sha }}"
+      - name: Build MSI
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: >
+          ./scripts/build-msi.ps1
+          -Architecture "${{ matrix.arch }}"
+          -Version "${{ steps.version.outputs.value }}"
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            installer/output/MapFTPDrive-*-setup*.exe
+            installer/output/MapFTPDrive-*.msi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.arch }}
+          path: |
+            installer/output/MapFTPDrive-*-setup*.exe
+            installer/output/MapFTPDrive-*-setup*.exe.sha256
+            installer/output/MapFTPDrive-*.msi
+            installer/output/MapFTPDrive-*.msi.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: dist
+          merge-multiple: true
+      - name: Build combined checksum manifest
+        working-directory: dist
+        run: cat *.sha256 | sort > SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --title "MapFTPDrive ${GITHUB_REF_NAME}"

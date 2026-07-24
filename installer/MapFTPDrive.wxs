@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="MapFTPDrive"
+      Manufacturer="MapFTPDrive contributors"
+      Version="$(var.Version)"
+      UpgradeCode="AF840353-B94C-4A8B-92FD-4B36BBDF2031"
+      Scope="perMachine">
+    <SummaryInformation Description="MapFTPDrive Windows Installer" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MapFTPDrive is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Property Id="WINFSPINSTALLDIR">
+      <RegistrySearch
+          Id="FindWinFsp"
+          Root="HKLM"
+          Key="Software\WinFsp"
+          Name="InstallDir"
+          Type="raw"
+          Bitness="always32" />
+    </Property>
+    <Launch Condition="Installed OR WINFSPINSTALLDIR" Message="WinFsp 2.1 or newer must be installed before installing the MapFTPDrive MSI. Use the MapFTPDrive setup EXE for an all-in-one installation." />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="MapFTPDrive">
+        <Component Id="ApplicationFiles" Guid="*">
+          <File Id="MapFTPDriveExe" Source="$(var.Binary)" KeyPath="yes" />
+          <File Id="LicenseFile" Source="$(var.RepoRoot)\LICENSE" />
+          <File Id="ReadmeFile" Source="$(var.RepoRoot)\README.md" />
+          <ServiceInstall
+              Id="MapFTPDriveServiceInstall"
+              Name="MapFTPDrive"
+              DisplayName="MapFTPDrive system mount service"
+              Description="Restores and supervises system-wide MapFTPDrive mounts."
+              Type="ownProcess"
+              Start="auto"
+              ErrorControl="normal"
+              Account="LocalSystem"
+              Arguments="service" />
+          <ServiceControl
+              Id="MapFTPDriveServiceControl"
+              Name="MapFTPDrive"
+              Start="install"
+              Stop="both"
+              Remove="uninstall"
+              Wait="yes" />
+          <RegistryValue
+              Root="HKLM"
+              Key="Software\Microsoft\Windows\CurrentVersion\Run"
+              Name="MapFTPDrive"
+              Type="string"
+              Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; daemon --scope user" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="MapFTPDrive">
+        <Component Id="ApplicationShortcut" Guid="*">
+          <Shortcut
+              Id="ApplicationStartMenuShortcut"
+              Name="MapFTPDrive"
+              Target="[INSTALLFOLDER]MapFTPDrive.exe"
+              WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue
+              Root="HKLM"
+              Key="Software\MapFTPDrive"
+              Name="StartMenuShortcut"
+              Type="integer"
+              Value="1"
+              KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="ExplorerIntegration" Directory="INSTALLFOLDER">
+      <Component Id="MapUserVerb" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDrive" Name="MUIVerb" Type="string" Value="Map FTP Drive" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDrive" Name="Icon" Type="string" Value="[INSTALLFOLDER]MapFTPDrive.exe" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDrive\command" Type="string" Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; map --scope user" />
+      </Component>
+      <Component Id="MapSystemVerb" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem" Name="MUIVerb" Type="string" Value="Map FTP Drive (system-wide)" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem" Name="Icon" Type="string" Value="[INSTALLFOLDER]MapFTPDrive.exe" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem" Name="Extended" Type="string" Value="" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem" Name="HasLUAShield" Type="string" Value="" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem\command" Type="string" Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; map --scope system" />
+      </Component>
+      <Component Id="UnmountVerb" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveUnmount" Name="MUIVerb" Type="string" Value="Unmount FTP Drive" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveUnmount" Name="Icon" Type="string" Value="[INSTALLFOLDER]MapFTPDrive.exe" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveUnmount\command" Type="string" Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; unmount --drive &quot;%V&quot;" />
+      </Component>
+      <Component Id="RemoveVerb" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRemove" Name="MUIVerb" Type="string" Value="Remove FTP Drive" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRemove" Name="Icon" Type="string" Value="[INSTALLFOLDER]MapFTPDrive.exe" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRemove" Name="Extended" Type="string" Value="" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRemove\command" Type="string" Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; remove --drive &quot;%V&quot;" />
+      </Component>
+      <Component Id="RenameVerb" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRename" Name="MUIVerb" Type="string" Value="Rename FTP Drive" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRename" Name="Icon" Type="string" Value="[INSTALLFOLDER]MapFTPDrive.exe" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Drive\shell\MapFTPDriveRename\command" Type="string" Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; rename --drive &quot;%V&quot;" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="MainFeature" Title="MapFTPDrive" Level="1">
+      <ComponentRef Id="ApplicationFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+      <ComponentGroupRef Id="ExplorerIntegration" />
+    </Feature>
+  </Package>
+</Wix>
