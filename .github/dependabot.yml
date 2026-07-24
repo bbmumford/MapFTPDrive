@@ -4,10 +4,31 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    rebase-strategy: auto
     open-pull-requests-limit: 5
+    groups:
+      go-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # rclone is pinned to a reviewed upstream commit and has locally
+      # extracted mount adapter code plus a provenance record. Dependabot can
+      # mistake an older stable tag for an upgrade from the newer pseudo-
+      # version, so maintainers update it manually.
+      - dependency-name: github.com/rclone/rclone
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    rebase-strategy: auto
     open-pull-requests-limit: 5
-
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

@@ -3,7 +3,8 @@
 MapFTPDrive is a native Windows application for mapping FTP, FTPS, and SFTP
 endpoints as persistent drive letters. It embeds the selected rclone
 backend/VFS code and hosts it directly on WinFsp; it does not invoke an
-`rclone.exe` child process.
+`rclone.exe` child process. Both supported installers carry the WinFsp
+runtime, so a separate prerequisite download is not required.
 
 ## Intended Windows experience
 
@@ -46,6 +47,19 @@ See `docs/architecture.md` for component and security boundaries.
 
 ## Use
 
+Download the installer for the computer's architecture from the latest
+GitHub release:
+
+- `windows-x64` for ordinary 64-bit Intel/AMD Windows computers.
+- `windows-arm64` for Windows on ARM.
+- `setup.exe` for an interactive installation.
+- `.msi` for Windows Installer and managed-deployment workflows.
+
+Both formats install MapFTPDrive and the bundled WinFsp 2.1 runtime when it
+is not already present. Installation requires administrator approval because
+the WinFsp filesystem driver and the MapFTPDrive system service are
+machine-wide components.
+
 After installation:
 
 1. Right-click **This PC** and select **Map FTP Drive**.
@@ -77,11 +91,21 @@ Each release produces x64 and ARM64 artifacts in two formats:
 
 - The `setup.exe` bootstrapper includes the pinned, checksum-verified WinFsp
   runtime and is the recommended installation path.
-- The `.msi` installs MapFTPDrive for managed deployment environments.
-  WinFsp 2.1 or newer must already be deployed on the target computer.
+- The `.msi` also embeds the same WinFsp runtime for Windows Installer and
+  managed deployment environments. If WinFsp is absent, an elevated
+  post-install helper waits for the MapFTPDrive MSI transaction to finish
+  and then installs WinFsp silently. This avoids unsupported nested MSI
+  transactions.
 
 Unsigned development artifacts include `-unsigned` in their filename.
-Officially signed builds omit that suffix.
+Signed builds use the clean base filename and never add `-signed`.
+Every artifact has a sibling `.sha256` file, and each release includes a
+combined `SHA256SUMS` manifest and GitHub build-provenance attestations.
+
+The MSI dependency helper detects WinFsp through its machine installation
+registry entry and skips installation when it is already present.
+Uninstalling MapFTPDrive does not remove WinFsp because other filesystem
+applications may depend on it.
 
 ## License
 
