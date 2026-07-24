@@ -1235,10 +1235,7 @@ func (o *Object) SetModTime(ctx context.Context, modTime time.Time) error {
 	path = o.fs.opt.Enc.FromStandardPath(path)
 	err = c.SetTime(path, modTime.In(time.UTC))
 	if err == nil && o.info != nil {
-		// The server stores modtimes with second precision so
-		// truncate here too to keep the in-memory modtime identical
-		// to the one a fresh listing returns.
-		o.info.ModTime = modTime.Truncate(time.Second)
+		o.info.ModTime = modTime
 		o.info.precise = true
 	}
 	o.fs.putFtpConnection(&c, err)
@@ -1393,12 +1390,9 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 	o.fs.putFtpConnection(&c, nil)
 	if o.fs.opt.NoCheckUpload {
 		o.info = &FileInfo{
-			Name: o.remote,
-			Size: uint64(src.Size()),
-			// The server stores modtimes with second precision so
-			// truncate here too to keep the in-memory modtime
-			// identical to the one a fresh listing returns.
-			ModTime: src.ModTime(ctx).Truncate(time.Second),
+			Name:    o.remote,
+			Size:    uint64(src.Size()),
+			ModTime: src.ModTime(ctx),
 			precise: true,
 			IsDir:   false,
 		}

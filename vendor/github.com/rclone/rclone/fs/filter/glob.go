@@ -83,7 +83,7 @@ func globToRegexp(glob string, pathMode bool, addAnchors bool, ignoreCase bool) 
 		buf := re.Bytes()
 		buf[len(buf)-1] = c
 	}
-	braceDepth := 0
+	inBraces := false
 	inBrackets := 0
 	slashed := false
 	inRegexp := false    // inside {{ ... }}
@@ -152,27 +152,25 @@ func globToRegexp(glob string, pathMode bool, addAnchors bool, ignoreCase bool) 
 		case ']':
 			return nil, fmt.Errorf("mismatched ']' in glob %q", glob)
 		case '{':
-			if braceDepth > 0 && last == '{' {
-				// {{ starts a raw regexp section. The '(' written by
-				// the first '{' wraps the regexp, so undo its depth.
-				// (An escaped \{ does not open a brace, so braceDepth
-				// guards against treating \{{ as a regexp section.)
-				inRegexp = true
-				braceDepth--
+			if inBraces {
+				if last == '{' {
+					inRegexp = true
+					inBraces = false
+				} else {
+					return nil, fmt.Errorf("can't nest '{' '}' in glob %q", glob)
+				}
 			} else {
-				// Open a brace group. These may nest, so each level
-				// emits its own balanced '(' ... ')'.
-				braceDepth++
+				inBraces = true
 				_ = re.WriteByte('(')
 			}
 		case '}':
-			if braceDepth <= 0 {
+			if !inBraces {
 				return nil, fmt.Errorf("mismatched '{' and '}' in glob %q", glob)
 			}
 			_ = re.WriteByte(')')
-			braceDepth--
+			inBraces = false
 		case ',':
-			if braceDepth > 0 {
+			if inBraces {
 				_ = re.WriteByte('|')
 			} else {
 				_, _ = re.WriteRune(c)
@@ -191,7 +189,7 @@ func globToRegexp(glob string, pathMode bool, addAnchors bool, ignoreCase bool) 
 	if inBrackets > 0 {
 		return nil, fmt.Errorf("mismatched '[' and ']' in glob %q", glob)
 	}
-	if braceDepth != 0 {
+	if inBraces {
 		return nil, fmt.Errorf("mismatched '{' and '}' in glob %q", glob)
 	}
 	if inRegexp {
@@ -211,8 +209,7 @@ var (
 	// Can't deal with
 	//   / or ** in {}
 	//   {{ regexp }}
-	//   nested {} (the inner braces are opaque to the directory split below)
-	tooHardRe = regexp.MustCompile(`({[^{}]*(\*\*|/)[^{}]*})|\{\{|\}\}|\{[^{}]*\{`)
+	tooHardRe = regexp.MustCompile(`({[^{}]*(\*\*|/)[^{}]*})|\{\{|\}\}`)
 
 	// Squash all /
 	squashSlash = regexp.MustCompile(`/{2,}`)

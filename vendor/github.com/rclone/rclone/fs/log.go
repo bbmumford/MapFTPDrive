@@ -12,10 +12,6 @@ import (
 	"github.com/rclone/rclone/lib/caller"
 )
 
-// logger represents the slog logging facility and should be overridden by
-// the fs/log handling code.
-var logger *slog.Logger = slog.Default()
-
 // LogLevel describes rclone's logs.  These are a subset of the syslog log levels.
 type LogLevel = Enum[logLevelChoices]
 
@@ -141,22 +137,13 @@ func LogLevelToSlog(level LogLevel) slog.Level {
 }
 
 func logSlog(level LogLevel, text string, attrs []any) {
-	logger.Log(context.Background(), LogLevelToSlog(level), text, attrs...)
+	slog.Log(context.Background(), LogLevelToSlog(level), text, attrs...)
 }
 
 func logSlogWithObject(level LogLevel, o any, text string, attrs []any) {
 	if o != nil {
-		var object string
-		switch o.(type) {
-		case fmt.Stringer, string:
-			object = fmt.Sprint(o)
-		default:
-			// Don't render the fields of arbitrary objects as they
-			// may contain sensitive data such as credentials.
-			object = fmt.Sprintf("%T", o)
-		}
 		attrs = slices.Concat(attrs, []any{
-			"object", object,
+			"object", fmt.Sprintf("%+v", o),
 			"objectType", fmt.Sprintf("%T", o),
 		})
 	}
@@ -349,9 +336,4 @@ func PrettyPrint(in any, label string, level LogLevel) {
 		return
 	}
 	LogPrintf(level, label, "\n%s\n", string(inBytes))
-}
-
-// SetLogger overrides the slog logger using the specified handler
-func SetLogger(h slog.Handler) {
-	logger = slog.New(h)
 }

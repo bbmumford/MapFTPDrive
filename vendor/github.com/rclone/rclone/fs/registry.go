@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rclone/rclone/backend/overview"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/config/configstruct"
 	"github.com/rclone/rclone/lib/errcount"
@@ -54,8 +53,6 @@ type RegInfo struct {
 	Hide bool
 	// MetadataInfo help about the metadata in use in this backend
 	MetadataInfo *MetadataInfo
-	// Overview about the backend
-	Overview *overview.BackendConfig
 }
 
 // FileName returns the on disk file name for this backend
@@ -434,12 +431,6 @@ func Register(info *RegInfo) {
 	}
 	info.Options = append(info.Options, optDescription)
 	Registry = append(Registry, info)
-	var err error
-	info.Overview, err = overview.GetBackendConfig(strings.ReplaceAll(info.Name, " ", ""))
-	if err != nil {
-		Errorf(nil, "internal error: no overview data found for %q", info.Name)
-		info.Overview = new(overview.BackendConfig)
-	}
 	for _, alias := range info.Aliases {
 		// Copy the info block and rename and hide the alias and options
 		aliasInfo := *info
