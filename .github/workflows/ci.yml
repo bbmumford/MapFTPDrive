@@ -57,7 +57,7 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "${{ matrix.arch }}"
           go build -mod=vendor -trimpath -o "build/MapFTPDrive-${{ matrix.arch }}.exe" ./cmd/mapftpdrive
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-${{ matrix.arch }}
           path: build/MapFTPDrive-${{ matrix.arch }}.exe
