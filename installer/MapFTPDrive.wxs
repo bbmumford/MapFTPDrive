@@ -22,7 +22,7 @@
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="MapFTPDrive">
-        <Component Id="ApplicationFiles" Guid="*">
+        <Component Id="ApplicationFiles" Guid="D658388E-AF81-42E2-8180-0798A4DD050F">
           <File Id="MapFTPDriveExe" Source="$(var.Binary)" KeyPath="yes" />
           <File Id="LicenseFile" Source="$(var.RepoRoot)\LICENSE" />
           <File Id="ReadmeFile" Source="$(var.RepoRoot)\README.md" />
