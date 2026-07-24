@@ -51,7 +51,7 @@ $signingSuffix = if ($signed) { "" } else { "-unsigned" }
 & $iscc "/DVersion=$Version" "/DArch=$innoArch" "/DBinary=$binary" "/DWinFspMsi=$winfsp" "/DSigningSuffix=$signingSuffix" (Join-Path $repo "installer/MapFTPDrive.iss")
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
 
-$installer = Get-ChildItem $output -Filter "MapFTPDrive-*-setup.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$installer = Get-ChildItem $output -Filter "MapFTPDrive-*-setup*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $installer) { throw "Installer output was not created" }
 
 if ($signed) {
