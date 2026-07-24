@@ -62,7 +62,7 @@ jobs:
           -Architecture "${{ matrix.arch }}"
           -Version "${{ steps.version.outputs.value }}"
       - name: Attest installer provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             installer/output/MapFTPDrive-*-setup*.exe
