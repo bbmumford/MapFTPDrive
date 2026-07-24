@@ -30,6 +30,16 @@ func run(args []string) error {
 		return launchUI(config.Scope(*scope))
 	case "install":
 		return installExplorerIntegration()
+	case "install-dependencies":
+		flags := flag.NewFlagSet("install-dependencies", flag.ContinueOnError)
+		source := flags.String("winfsp", "", "path to the bundled WinFsp MSI")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *source == "" {
+			return fmt.Errorf("--winfsp is required")
+		}
+		return installDependencies(*source)
 	case "uninstall":
 		return uninstallExplorerIntegration()
 	case "service":

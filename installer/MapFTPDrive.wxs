@@ -9,7 +9,7 @@
     <SummaryInformation Description="MapFTPDrive Windows Installer" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of MapFTPDrive is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
-    <Property Id="WINFSPINSTALLDIR">
+    <Property Id="WINFSPINSTALLDIR" Secure="yes">
       <RegistrySearch
           Id="FindWinFsp"
           Root="HKLM"
@@ -18,7 +18,6 @@
           Type="raw"
           Bitness="always32" />
     </Property>
-    <Launch Condition="Installed OR WINFSPINSTALLDIR" Message="WinFsp 2.1 or newer must be installed before installing the MapFTPDrive MSI. Use the MapFTPDrive setup EXE for an all-in-one installation." />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="MapFTPDrive">
@@ -26,6 +25,7 @@
           <File Id="MapFTPDriveExe" Source="$(var.Binary)" KeyPath="yes" />
           <File Id="LicenseFile" Source="$(var.RepoRoot)\LICENSE" />
           <File Id="ReadmeFile" Source="$(var.RepoRoot)\README.md" />
+          <File Id="WinFspMsi" Source="$(var.WinFspMsi)" Name="winfsp-runtime.msi" />
           <ServiceInstall
               Id="MapFTPDriveServiceInstall"
               Name="MapFTPDrive"
@@ -109,5 +109,21 @@
       <ComponentRef Id="ApplicationShortcut" />
       <ComponentGroupRef Id="ExplorerIntegration" />
     </Feature>
+
+    <!--
+      Windows Installer forbids a nested MSI transaction. Launch the embedded
+      dependency helper without waiting; it retries until this package releases
+      the installer mutex, then silently installs WinFsp as LocalSystem.
+    -->
+    <CustomAction
+        Id="InstallBundledWinFsp"
+        FileRef="MapFTPDriveExe"
+        ExeCommand="install-dependencies --winfsp &quot;[INSTALLFOLDER]winfsp-runtime.msi&quot;"
+        Execute="deferred"
+        Impersonate="no"
+        Return="asyncNoWait" />
+    <InstallExecuteSequence>
+      <Custom Action="InstallBundledWinFsp" After="InstallFiles" Condition="NOT Installed AND NOT WINFSPINSTALLDIR" />
+    </InstallExecuteSequence>
   </Package>
 </Wix>
