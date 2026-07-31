@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@v4.37.3
         with:
           languages: go
       - uses: actions/setup-go@v7
@@ -26,4 +26,4 @@ jobs:
       - run: go build -mod=vendor ./cmd/mapftpdrive
         env:
           CGO_ENABLED: "0"
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@v4.37.3
