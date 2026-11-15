@@ -11,6 +11,10 @@ func Install(executable string) error { return install(executable) }
 func Uninstall() error                { return uninstall() }
 func EnsureStarted() error            { return ensureStarted() }
 
+// Configure applies delayed automatic start and the recovery actions to the
+// installed service; the MSI runs it after creating the service.
+func Configure() error { return configure() }
+
 // RegisterEventSource registers the Application event log source the
 // service reports start refusals and warnings under.
 func RegisterEventSource() error { return registerEventSource() }

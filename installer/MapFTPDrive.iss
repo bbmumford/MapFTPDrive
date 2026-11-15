@@ -195,9 +195,23 @@ begin
   end;
 end;
 
+{ StopService stops an installed MapFTPDrive service and waits for it, so
+  Setup can replace its executable; the install step then reconfigures and
+  restarts it. "net stop" exits with 2 when the service is absent or
+  already stopped, which needs no action. }
+procedure StopService;
+var
+  ResultCode: Integer;
+begin
+  if Exec(ExpandConstant('{sys}\net.exe'), 'stop MapFTPDrive', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('net stop MapFTPDrive exit code: ' + IntToStr(ResultCode));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := InstallWinFsp;
+  if Result = '' then
+    StopService;
 end;
 
 function NeedRestart: Boolean;

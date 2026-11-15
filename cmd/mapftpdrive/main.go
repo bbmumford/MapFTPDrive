@@ -8,6 +8,7 @@ import (
 	"mapftpdrive/internal/buildinfo"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/explorer"
+	"mapftpdrive/internal/service"
 )
 
 func main() {
@@ -49,6 +50,8 @@ func run(args []string) error {
 		return installMachine()
 	case "prepare-system-data":
 		return prepareSystemData()
+	case "configure-service":
+		return service.Configure()
 	case "uninstall":
 		return uninstallMachine()
 	case "service":

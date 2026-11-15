@@ -149,7 +149,22 @@
         Execute="deferred"
         Impersonate="no"
         Return="check" />
+    <!--
+      Applies the service settings ServiceInstall cannot express, with the
+      same code the EXE installer uses: delayed automatic start, and a
+      restart after 5, 15 and 60 seconds on a crash or an error exit, with
+      the failure count reset after one day. Windows Installer's own
+      MsiServiceConfig tables are documented as unreliable.
+    -->
+    <CustomAction
+        Id="ConfigureService"
+        FileRef="MapFTPDriveExe"
+        ExeCommand="configure-service"
+        Execute="deferred"
+        Impersonate="no"
+        Return="check" />
     <InstallExecuteSequence>
+      <Custom Action="ConfigureService" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="PrepareSystemData" Before="StartServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
     </InstallExecuteSequence>
   </Package>

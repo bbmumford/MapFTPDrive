@@ -16,6 +16,19 @@ being linked into the Go executable. It is delivered inside every
 MapFTPDrive installer, so users do not have to locate or install it
 separately.
 
+## Service lifecycle
+
+The `MapFTPDrive` service runs `MapFTPDrive.exe service` as LocalSystem with
+delayed automatic start, so system drives connect after the network is up.
+Its recovery actions restart it 5, 15 and 60 seconds after a crash or an
+error exit, and the failure count resets after one day. Both installers
+apply these settings with the same code: the EXE's `install` step creates
+the service, or stops an existing one, rewrites its configuration and
+restarts it, so an upgrade runs the new executable with current settings;
+the MSI creates it with `ServiceInstall` and runs `configure-service` as a
+custom action before starting it. The EXE stops the service before
+replacing files.
+
 ## Elevation
 
 Both installers register every Explorer verb machine-wide under
