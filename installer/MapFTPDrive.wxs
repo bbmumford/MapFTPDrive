@@ -52,6 +52,12 @@
               Type="string"
               Value="&quot;[INSTALLFOLDER]MapFTPDrive.exe&quot; daemon --scope user" />
         </Component>
+        <!-- The source the service logs start refusals and warnings under. -->
+        <Component Id="EventLogSource" Guid="*">
+          <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\MapFTPDrive" Name="EventMessageFile" Type="expandable" Value="%SystemRoot%\System32\EventCreate.exe" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\MapFTPDrive" Name="TypesSupported" Type="integer" Value="7" />
+          <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\MapFTPDrive" Name="CustomSource" Type="integer" Value="1" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -116,9 +122,26 @@
 
     <Feature Id="MainFeature" Title="MapFTPDrive" Level="1">
       <ComponentRef Id="ApplicationFiles" />
+      <ComponentRef Id="EventLogSource" />
       <ComponentRef Id="ApplicationShortcut" />
       <ComponentGroupRef Id="ExplorerIntegration" />
     </Feature>
+
+    <!--
+      %ProgramData%\MapFTPDrive must admit only SYSTEM and Administrators
+      before the service starts, or the service refuses to run. The program
+      creates or repairs it as LocalSystem instead of a CreateFolder with
+      permissions: Windows Installer would follow a junction planted at that
+      path and never examines entries other users may already have placed
+      inside it. Install, repair and upgrade all run it.
+    -->
+    <CustomAction
+        Id="PrepareSystemData"
+        FileRef="MapFTPDriveExe"
+        ExeCommand="prepare-system-data"
+        Execute="deferred"
+        Impersonate="no"
+        Return="check" />
 
     <!--
       Windows Installer forbids a nested MSI transaction. Launch the embedded
@@ -133,6 +156,7 @@
         Impersonate="no"
         Return="asyncNoWait" />
     <InstallExecuteSequence>
+      <Custom Action="PrepareSystemData" Before="StartServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="InstallBundledWinFsp" After="InstallFiles" Condition="NOT Installed AND NOT WINFSPINSTALLDIR" />
     </InstallExecuteSequence>
   </Package>

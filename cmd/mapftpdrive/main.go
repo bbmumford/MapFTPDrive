@@ -47,6 +47,8 @@ func run(args []string) error {
 		return launchUI(config.Scope(*scope))
 	case "install":
 		return installExplorerIntegration()
+	case "prepare-system-data":
+		return prepareSystemData()
 	case "install-dependencies":
 		flags := flag.NewFlagSet("install-dependencies", flag.ContinueOnError)
 		source := flags.String("winfsp", "", "path to the bundled WinFsp MSI")

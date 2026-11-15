@@ -17,9 +17,29 @@ import (
 
 type handler struct{}
 
+// Service-specific exit codes reported to the Service Control Manager.
+const (
+	exitHostFailed       = 1
+	exitStopTimeout      = 2
+	exitInsecureDataPath = 3
+)
+
 func (handler) Execute(_ []string, requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	changes <- svc.Status{State: svc.StartPending}
+	if err := config.PrepareSystemDirectory(); err != nil {
+		logError(eventStartRefused, fmt.Sprintf(
+			"MapFTPDrive will not start because its data directory is not protected: %v. "+
+				"Repair or reinstall MapFTPDrive to restore the directory's permissions.", err))
+		return true, exitInsecureDataPath
+	}
+	if path, err := config.DefaultPath(config.System); err == nil {
+		if err := config.NewStore(path).RefreshDriveIndex(); err != nil {
+			logWarning(eventDriveIndexFailed, fmt.Sprintf(
+				"MapFTPDrive could not update its drive index, so Explorer commands may not recognise system drives: %v", err))
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- host.Run(ctx, config.System) }()
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
@@ -27,7 +47,7 @@ func (handler) Execute(_ []string, requests <-chan svc.ChangeRequest, changes ch
 		select {
 		case err := <-done:
 			if err != nil {
-				return true, 1
+				return true, exitHostFailed
 			}
 			return false, 0
 		case request := <-requests:
@@ -40,7 +60,7 @@ func (handler) Execute(_ []string, requests <-chan svc.ChangeRequest, changes ch
 				select {
 				case <-done:
 				case <-time.After(20 * time.Second):
-					return true, 2
+					return true, exitStopTimeout
 				}
 				return false, 0
 			default:

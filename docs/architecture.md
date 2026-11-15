@@ -28,8 +28,41 @@ still displays its UAC consent UI.
 ## Persistence
 
 User definitions live under `%LOCALAPPDATA%\MapFTPDrive`. System definitions
-live under `%ProgramData%\MapFTPDrive` with an ACL limited to Administrators
-and SYSTEM. Passwords are separate Windows Credential Manager entries.
+live under `%ProgramData%\MapFTPDrive`. Passwords are separate Windows
+Credential Manager entries.
+
+`%ProgramData%` lets every user create files and folders, so the system
+directory carries its own protected descriptor
+(`O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`): owned by Administrators,
+nothing inherited from `%ProgramData%`, full control for SYSTEM and
+Administrators only. Anyone else who could write it could change the
+endpoints the service mounts with stored passwords, or redirect the
+service's file writes.
+
+- Both installers run `MapFTPDrive.exe prepare-system-data` (the MSI as a
+  LocalSystem custom action, the EXE through `install`). It creates the
+  directory with that descriptor, or repairs an existing one: a junction or
+  symbolic link at that path is removed rather than followed, the directory
+  is locked first, and every entry another principal could have written
+  (owned by someone else, writable by someone else, a reparse point, or a
+  file with extra hard links) is deleted before the descriptor is
+  propagated to what remains.
+- The endpoint store creates the directory with the same descriptor if it
+  is ever missing, instead of a plain `MkdirAll`.
+- The service checks the directory and its direct entries at every start.
+  If any is a reparse point, is owned by anyone other than SYSTEM,
+  Administrators or TrustedInstaller, or grants write access to anyone
+  else, the service stops with service-specific exit code 3 and writes
+  event ID 1 from source `MapFTPDrive` to the Application log. Repairing or
+  reinstalling restores the directory.
+
+Unelevated processes, such as the Explorer verbs, cannot read the system
+store. The service therefore keeps `drives.json` beside it: drive letter,
+scope, ID, name and whether the drive is unmounted, with no server, user
+name, path, host key or credential reference. It is rewritten after every
+system store save and at every service start, and carries its own
+descriptor (`O:BAG:SYD:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)`) so Users
+may read but not change it. Elevated processes read the store itself.
 
 Unmount transitions a definition to inactive but retains it. Remove
 unmounts it, removes the definition, and deletes its credential.

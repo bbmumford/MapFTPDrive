@@ -104,6 +104,9 @@ func launchUI(scope config.Scope) error {
 }
 
 func installExplorerIntegration() error {
+	if err := prepareSystemData(); err != nil {
+		return err
+	}
 	if err := explorer.Install(); err != nil {
 		return err
 	}
@@ -112,6 +115,16 @@ func installExplorerIntegration() error {
 		return err
 	}
 	return service.Install(executable)
+}
+
+// prepareSystemData creates or repairs the protected system data directory
+// and registers the service's event log source. Both installers run it
+// elevated before the service starts, which otherwise refuses to run.
+func prepareSystemData() error {
+	if err := config.SecureSystemDirectory(); err != nil {
+		return fmt.Errorf("secure the system data directory: %w", err)
+	}
+	return service.RegisterEventSource()
 }
 
 func uninstallExplorerIntegration() error {
@@ -200,20 +213,39 @@ func mountUnmountedDrive() error {
 	return runDriveAction("mount", choices[index].DriveLetter, "")
 }
 
-// managedDrives returns the endpoints this process can see in both scopes.
-// A store that cannot be read is skipped so the other scope stays usable.
+// managedDrives returns the endpoints of both scopes. A scope that cannot
+// be read is skipped so the other stays usable.
 func managedDrives() []config.Endpoint {
 	var endpoints []config.Endpoint
-	for _, scope := range []config.Scope{config.User, config.System} {
-		path, err := config.DefaultPath(scope)
-		if err != nil {
-			continue
+	if path, err := config.DefaultPath(config.User); err == nil {
+		if loaded, err := config.NewStore(path).Load(); err == nil {
+			endpoints = append(endpoints, loaded...)
 		}
-		loaded, err := config.NewStore(path).Load()
-		if err != nil {
-			continue
+	}
+	return append(endpoints, systemDrives()...)
+}
+
+// systemDrives lists the system-scope drives. Only SYSTEM and
+// Administrators may read the system store, so an elevated process reads
+// it directly and any other process reads the drive index the service
+// keeps beside it, which holds the letter, ID, name and state.
+func systemDrives() []config.Endpoint {
+	if windows.GetCurrentProcessToken().IsElevated() {
+		if path, err := config.DefaultPath(config.System); err == nil {
+			if loaded, err := config.NewStore(path).Load(); err == nil {
+				return loaded
+			}
 		}
-		endpoints = append(endpoints, loaded...)
+	}
+	indexed, err := config.ReadDriveIndex()
+	if err != nil {
+		return nil
+	}
+	endpoints := make([]config.Endpoint, 0, len(indexed))
+	for _, drive := range indexed {
+		if drive.Scope == config.System {
+			endpoints = append(endpoints, drive.Endpoint())
+		}
 	}
 	return endpoints
 }

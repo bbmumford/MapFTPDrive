@@ -21,6 +21,7 @@ func runService() error                           { return errWindowsOnly }
 func runDaemon(config.Scope) error                { return errWindowsOnly }
 func runDriveAction(string, string, string) error { return errWindowsOnly }
 func mountUnmountedDrive() error                  { return errWindowsOnly }
+func prepareSystemData() error                    { return errWindowsOnly }
 
 func reportError(err error, _ bool) {
 	fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
