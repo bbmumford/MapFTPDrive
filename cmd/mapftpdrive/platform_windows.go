@@ -185,13 +185,23 @@ func findManagedDrive(drive string) (config.Scope, config.Endpoint, error) {
 	return "", config.Endpoint{}, fmt.Errorf("drive %q is not managed by MapFTPDrive", drive)
 }
 
+// ensureHost returns once the scope's host answers on its pipe, starting
+// the host when nothing answers. A host takes its pipe before it mounts
+// anything, so an answer means it is ready for requests, however long its
+// mounts take. A host started while another already owns the pipe exits
+// cleanly, so starting one more than needed is harmless; a started user
+// host that exits with an error ends the wait with that error instead of
+// waiting out the deadline.
 func ensureHost(scope config.Scope) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
-	err := control.Send(ctx, scope, control.Request{Operation: control.Ping})
-	cancel()
-	if err == nil {
+	ping := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return control.Send(ctx, scope, control.Request{Operation: control.Ping})
+	}
+	if ping() == nil {
 		return nil
 	}
+	var exited chan error
 	if scope == config.System {
 		if err := service.EnsureStarted(); err != nil {
 			return err
@@ -209,19 +219,33 @@ func ensureHost(scope config.Scope) error {
 		if err := command.Start(); err != nil {
 			return err
 		}
-		_ = command.Process.Release()
+		exited = make(chan error, 1)
+		go func() { exited <- command.Wait() }()
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err := control.Send(ctx, scope, control.Request{Operation: control.Ping})
-		cancel()
+	const readyWithin = 60 * time.Second
+	deadline := time.Now().Add(readyWithin)
+	delay := 50 * time.Millisecond
+	for {
+		err := ping()
 		if err == nil {
 			return nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case exitErr := <-exited:
+			exited = nil
+			if exitErr != nil {
+				return fmt.Errorf("the MapFTPDrive host exited (%w); see mapftpdrive.log in %%LOCALAPPDATA%%\\MapFTPDrive\\logs", exitErr)
+			}
+		default:
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the MapFTPDrive host did not answer within %s: %w", readyWithin, err)
+		}
+		time.Sleep(delay)
+		if delay < time.Second {
+			delay *= 2
+		}
 	}
-	return errors.New("mount host did not become ready")
 }
 
 func relaunchElevated(arguments string) error {
