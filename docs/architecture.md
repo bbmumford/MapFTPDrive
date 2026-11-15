@@ -8,8 +8,19 @@ the same engine to restore system-scoped drives as LocalSystem.
 
 The engine constructs an rclone FTP or SFTP filesystem directly, layers the
 rclone VFS over it, and exposes that VFS through the cgofuse/WinFsp host.
-FTPS uses the FTP backend with explicit TLS. No external rclone process,
-configuration file, or remote-control API is involved.
+FTPS uses the FTP backend with explicit or implicit TLS. No external
+rclone process, configuration file, or remote-control API is involved.
+
+The VFS caches written files on disk (cache mode `writes`), caches
+directory listings for a minute, and rclone's connect (10 s) and idle
+(60 s) timeouts with two low-level attempts bound how long Explorer waits
+on an unreachable server. SFTP host keys are pinned through rclone's
+`host_keys` option or a known_hosts file, and remote shell commands are
+disabled. rclone's FTP backend cannot pin certificates, so a check on
+rclone's shared TLS configuration enforces a pinned certificate's SHA-256
+on every FTPS handshake, and rejects any handshake that skipped normal
+verification without a matching pin. rclone's log output goes to the
+host's log.
 
 WinFsp remains a separately serviced Windows filesystem driver rather than
 being linked into the Go executable. It is delivered inside every
@@ -25,14 +36,65 @@ process sends the definition and a protected credential to the installed
 service. Merely holding Shift does not silently grant system scope; Windows
 still displays its UAC consent UI.
 
+## Supervision
+
+Each scope has one host: the per-user host (`daemon --scope user`, started
+at sign-in) and the LocalSystem service. A host takes its scope's control
+pipe before it mounts anything; the pipe is created as the first instance,
+so it doubles as a singleton lock and a second host for the same scope
+exits without touching any drive. Clients (`ensureHost`) wait for the pipe
+to answer instead of guessing start-up delays.
+
+After taking the pipe the host lists every stored drive, waits up to 90
+seconds for a usable network, and then supervises each enabled drive in
+its own loop:
+
+- a failed attempt is retried after about 5 s, doubling to 5 minutes, with
+  20% jitter; a network change (IP interface or address notification)
+  retries waiting drives at once;
+- a mount that ends without a request is remounted, never deleted;
+- a changed or unpinned server identity, a missing credential or a missing
+  key file stops retrying until the user acts (mount, edit or re-pin).
+
+User operations on one drive are serialised, and the loop alone owns the
+mount, so mount and unmount cannot interleave. The `status` request
+reports each drive as mounted, connecting, retrying (with the next attempt
+time and last error), unmounted, or needing attention (with the pinned and
+presented fingerprints for an identity change).
+
+Map tests the server identity, mounts with the supplied secret and only
+then stores the credential and definition, undoing every step on failure.
+Edit does the same and restores the previous mount when the new
+definition fails. Rename remounts a mounted drive with the new label,
+because WinFsp FUSE volumes reject Explorer's label changes.
+
 ## Persistence
 
 User definitions live under `%LOCALAPPDATA%\MapFTPDrive`. System definitions
 live under `%ProgramData%\MapFTPDrive` with an ACL limited to Administrators
-and SYSTEM. Passwords are separate Windows Credential Manager entries.
+and SYSTEM. Passwords and private-key passphrases are separate Windows
+Credential Manager entries.
+
+`endpoints.json` is a versioned envelope (`{"version": 1, "endpoints":
+[...]}`); the unversioned array written by earlier builds is read and
+rewritten on the next save, and a newer version is refused rather than
+overwritten. Endpoint IDs are UUIDs and every per-drive file is named by a
+hash of the ID. Entries that fail validation are skipped, reported and
+written back unchanged. Saves go through a temporary file that is flushed
+before a write-through rename, and the previous file is kept as
+`endpoints.json.bak`, which is used if the main file cannot be read.
+
+Beside the store each scope keeps `known_hosts\<hash>` (pinned SFTP host
+keys, when the linked rclone has no `host_keys` option), `keys\<hash>`
+(copied private keys), `cache\vfs\<hash>` and `cache\vfsMeta\<hash>` (the
+VFS write cache) and `logs` (rotating `mapftpdrive.log`). The system host
+also writes `drives.json`, a secret-free index of drive letter, scope, ID
+and name with a DACL that lets Users read it, so unelevated processes can
+recognise system drives and avoid their letters.
 
 Unmount transitions a definition to inactive but retains it. Remove
-unmounts it, removes the definition, and deletes its credential.
+unmounts it, removes the definition, and deletes its credential, pinned
+host key, copied key and cache.
 
 ## Explorer integration
 
