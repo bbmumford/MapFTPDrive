@@ -50,7 +50,7 @@ func pipeSecurity(scope config.Scope) (string, error) {
 	return "D:P(A;;GA;;;SY)(A;;GA;;;" + sid + ")", nil
 }
 
-func serve(ctx context.Context, scope config.Scope, handler Handler) error {
+func serve(ctx context.Context, scope config.Scope, handler Handler, ready func()) error {
 	name, err := pipeName(scope)
 	if err != nil {
 		return err
@@ -72,6 +72,9 @@ func serve(ctx context.Context, scope config.Scope, handler Handler) error {
 		<-ctx.Done()
 		listener.Close()
 	}()
+	if ready != nil {
+		ready()
+	}
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -94,35 +97,35 @@ func handleConnection(ctx context.Context, connection net.Conn, handler Handler)
 		_ = encoder.Encode(Response{Error: "invalid request"})
 		return
 	}
-	response := Response{}
-	if err := handler(ctx, request); err != nil {
+	response, err := handler(ctx, request)
+	if err != nil {
 		response.Error = err.Error()
 	}
 	_ = encoder.Encode(response)
 }
 
-func send(ctx context.Context, scope config.Scope, request Request) error {
+func send(ctx context.Context, scope config.Scope, request Request) (Response, error) {
 	name, err := pipeName(scope)
 	if err != nil {
-		return err
+		return Response{}, err
 	}
 	connection, err := winio.DialPipeContext(ctx, name)
 	if err != nil {
-		return err
+		return Response{}, err
 	}
 	defer connection.Close()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = connection.SetDeadline(deadline)
 	}
 	if err := json.NewEncoder(connection).Encode(request); err != nil {
-		return err
+		return Response{}, err
 	}
 	var response Response
 	if err := json.NewDecoder(io.LimitReader(connection, 64*1024)).Decode(&response); err != nil {
-		return err
+		return Response{}, err
 	}
 	if response.Error != "" {
-		return fmt.Errorf("MapFTPDrive host: %s", response.Error)
+		return response, fmt.Errorf("MapFTPDrive host: %s", response.Error)
 	}
-	return nil
+	return response, nil
 }

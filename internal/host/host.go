@@ -23,7 +23,7 @@ func Run(ctx context.Context, scope config.Scope) error {
 	_ = supervisor.Start(ctx)
 	defer supervisor.Stop()
 
-	return control.Serve(ctx, scope, func(_ context.Context, request control.Request) error {
+	handle := func(_ context.Context, request control.Request) error {
 		switch request.Operation {
 		case control.Ping:
 			return nil
@@ -50,5 +50,8 @@ func Run(ctx context.Context, scope config.Scope) error {
 		default:
 			return fmt.Errorf("unsupported operation %q", request.Operation)
 		}
+	}
+	return control.Serve(ctx, scope, func(ctx context.Context, request control.Request) (control.Response, error) {
+		return control.Response{}, handle(ctx, request)
 	})
 }
