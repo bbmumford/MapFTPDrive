@@ -76,9 +76,11 @@ each architecture's MSI pass.
 ## Upstream source
 
 The Go dependency closure needed for FTP, SFTP, VFS, and cgofuse is retained
-in `vendor`. Selected WinFsp source/provenance and its unmodified license are
-retained in `third_party/winfsp`; the installer carries the unmodified,
-hash-pinned upstream WinFsp redistributable. Because the application combines
+in `vendor`. The installer carries the unmodified, hash-pinned upstream
+WinFsp 2.1 redistributable, whose corresponding source is the upstream
+`v2.1` tag. `third_party/winfsp` holds WinFsp's unmodified license and a
+later, unbuilt reference snapshot of its source; its `UPSTREAM.md` records
+both commits. Because the application combines
 GPL-covered components, the project and distributed binaries use a
 GPL-compatible distribution model and retain corresponding source and
 notices.
