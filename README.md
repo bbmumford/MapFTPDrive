@@ -74,6 +74,12 @@ Hold Shift while right-clicking **This PC** to reveal
 **Map FTP Drive (system-wide)**. Windows requests UAC approval before the
 system mapping dialog is displayed.
 
+A system-wide drive is visible to every user of the computer, and all of
+them can read, change and delete its remote files using the account the
+administrator entered (the password itself stays hidden in the service's
+Credential Manager). Map a per-user drive unless every local user may have
+that access; see `SECURITY.md`.
+
 Unmount retains a disabled definition. Right-click **This PC** and choose
 **Mount FTP Drive** to mount it again. Remove deletes both the definition
 and its Credential Manager entry. The drive commands appear only on
