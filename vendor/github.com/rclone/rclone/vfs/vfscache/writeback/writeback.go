@@ -254,8 +254,8 @@ func (wb *WriteBack) SetID(pid *Handle) {
 //
 // Use SetID to create Handles in advance of calling Add.
 //
-// If modified is false then it doesn't cancel a pending upload if
-// there is one as there is no need.
+// If modified is false then it neither cancels an upload in progress
+// nor delays a pending one, as the data to upload hasn't changed.
 func (wb *WriteBack) Add(id Handle, name string, size int64, modified bool, putFn PutFn) Handle {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
@@ -263,8 +263,8 @@ func (wb *WriteBack) Add(id Handle, name string, size int64, modified bool, putF
 	wbItem, ok := wb.lookup[id]
 	if !ok {
 		wbItem = wb._newItem(id, name, size)
-	} else {
-		if wbItem.uploading && modified {
+	} else if modified {
+		if wbItem.uploading {
 			// We are uploading already so cancel the upload
 			wb._cancelUpload(wbItem)
 		}
@@ -352,7 +352,9 @@ func (wb *WriteBack) upload(ctx context.Context, wbItem *writeBackItem) {
 	fs.Debugf(wbItem.name, "vfs cache: starting upload")
 
 	wb.mu.Unlock()
-	err := putFn(ctx)
+	// Recover around the upload itself rather than the whole goroutine, so a
+	// panicking backend is retried like any other upload failure below.
+	err := vfscommon.RecoverCall(wbItem.name, func() error { return putFn(ctx) })
 	wb.mu.Lock()
 
 	wbItem.cancel() // cancel context to release resources since store done

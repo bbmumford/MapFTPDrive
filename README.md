@@ -77,7 +77,10 @@ deletes both the definition and its Credential Manager entry.
 
 ## Build
 
-Go 1.25 or newer is required. Release builds use the checked-in vendor tree:
+The build uses the Go toolchain named by the `toolchain` line in `go.mod`
+(currently Go 1.27.4); with the default `GOTOOLCHAIN=auto`, any installed Go
+1.21 or newer downloads it automatically. Release builds use the checked-in
+vendor tree:
 
 ```text
 go test -mod=vendor ./...

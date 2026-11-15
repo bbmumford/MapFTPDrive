@@ -17,6 +17,7 @@ import (
 	"github.com/rclone/rclone/lib/ranges"
 	"github.com/rclone/rclone/vfs/vfscache/downloaders"
 	"github.com/rclone/rclone/vfs/vfscache/writeback"
+	"github.com/rclone/rclone/vfs/vfscommon"
 )
 
 // NB as Cache and Item are tightly linked it is necessary to have a
@@ -578,6 +579,13 @@ func (item *Item) open(o fs.Object) (err error) {
 			_ = dls.Close(nil)
 			item.mu.Lock()
 		}
+		// _checkObject sized the old fd, so size the new file here
+		// or GetSize reads 0 and ReadAt returns unfetched zeros.
+		err = item._truncateToCurrentSize()
+		if err != nil {
+			item.opens--
+			return fmt.Errorf("vfs cache item: recreate cache file failed: %w", err)
+		}
 	}
 
 	err = item._createFile(osPath)
@@ -721,6 +729,7 @@ func (item *Item) Close(storeFn StoreFn) (err error) {
 // Grace period only applies to non-dirty files, so storeFn (only
 // needed for writeback) and syncWriteBack are not relevant.
 func (item *Item) closeAfterGrace() {
+	defer vfscommon.RecoverPanic(item.name, nil)
 	item.mu.Lock()
 	defer item.mu.Unlock()
 
@@ -736,9 +745,14 @@ func (item *Item) closeAfterGrace() {
 	// progress so a concurrent open waits rather than tripping over the
 	// half-closed handle.
 	item.closing = make(chan struct{})
+	// Release the waiters however this ends: if a panic in the backend is
+	// recovered above, leaving item.closing open would block every later
+	// open of this file forever.
+	defer func() {
+		close(item.closing)
+		item.closing = nil
+	}()
 	err := item._actualClose(nil, false)
-	close(item.closing)
-	item.closing = nil
 	if err != nil {
 		fs.Errorf(item.name, "vfs cache: close after grace period failed: %v", err)
 	}
@@ -1454,10 +1468,24 @@ func (item *Item) WriteAt(b []byte, off int64) (n int, err error) {
 //
 // This is used by the downloader to write bytes to the file.
 //
+// Bytes past the end of the item are not written; they are counted
+// as processed and skipped.
+//
 // It returns n the total bytes processed and skipped the number of
 // bytes which were processed but not actually written to the file.
 func (item *Item) WriteAtNoOverwrite(b []byte, off int64) (n int, skipped int, err error) {
 	item.mu.Lock()
+
+	// Don't write past the end of the item. If the file was shrunk
+	// with Truncate while the remote object is still longer, the
+	// downloader would otherwise grow the cache file back to the
+	// size of the remote object.
+	beyond := 0
+	if end := off + int64(len(b)); end > item.info.Size {
+		keep := max(item.info.Size-off, 0)
+		beyond = len(b) - int(keep)
+		b = b[:keep]
+	}
 
 	var (
 		// Range we wish to write
@@ -1500,6 +1528,10 @@ func (item *Item) WriteAtNoOverwrite(b []byte, off int64) (n int, skipped int, e
 		}
 	}
 	item.mu.Unlock()
+	if err == nil {
+		n += beyond
+		skipped += beyond
+	}
 	return n, skipped, err
 }
 
