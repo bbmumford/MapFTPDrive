@@ -4,17 +4,9 @@ package mount
 
 import (
 	"context"
-	"fmt"
-	"strconv"
+	"sync"
 
-	"github.com/rclone/rclone/backend/ftp"
-	"github.com/rclone/rclone/backend/sftp"
 	"github.com/rclone/rclone/cmd/mountlib"
-	"github.com/rclone/rclone/fs"
-	"github.com/rclone/rclone/fs/config/configmap"
-	"github.com/rclone/rclone/fs/config/obscure"
-	"github.com/rclone/rclone/vfs/vfscommon"
-	"mapftpdrive/internal/config"
 )
 
 type windowsEngine struct{}
@@ -24,66 +16,50 @@ func newPlatformEngine() Engine {
 }
 
 type windowsHandle struct {
-	point *mountlib.MountPoint
+	point   *mountlib.MountPoint
+	release func()
+	once    sync.Once
 }
 
-func (h windowsHandle) Wait() error    { return h.point.Wait() }
-func (h windowsHandle) Unmount() error { return h.point.Unmount() }
+// Wait blocks until the mount ends, whether unmounted on request or torn
+// down by WinFsp, and then drops the endpoint's FTPS pin registration.
+func (h *windowsHandle) Wait() error {
+	err := h.point.Wait()
+	h.once.Do(h.release)
+	return err
+}
 
-func (windowsEngine) Mount(ctx context.Context, endpoint config.Endpoint, secret Secret) (Handle, error) {
-	if err := endpoint.Validate(); err != nil {
+func (h *windowsHandle) Unmount() error {
+	err := h.point.Unmount()
+	h.once.Do(h.release)
+	return err
+}
+
+// Mount connects with a context detached from the caller's cancellation:
+// rclone backends may keep the construction context for later operations,
+// and a request-scoped context ends while the drive stays mounted. The
+// connect is bounded by connectTimeout and lowLevelRetries instead.
+func (windowsEngine) Mount(ctx context.Context, spec Spec) (Handle, error) {
+	remote, release, err := newFs(context.WithoutCancel(ctx), spec)
+	if err != nil {
 		return nil, err
 	}
-	password, err := obscure.Obscure(secret.Password)
-	if err != nil {
-		return nil, fmt.Errorf("protect backend password: %w", err)
-	}
-	options := configmap.Simple{
-		"host": endpoint.Host,
-		"port": strconv.Itoa(int(endpoint.Port)),
-		"user": endpoint.Username,
-		"pass": password,
-	}
-
-	var remote fs.Fs
-	switch endpoint.Protocol {
-	case config.FTP:
-		remote, err = ftp.NewFs(ctx, endpoint.ID, endpoint.RemotePath, options)
-	case config.FTPS:
-		if endpoint.TLSMode == config.TLSImplicit {
-			options["tls"] = "true"
-		} else {
-			options["explicit_tls"] = "true"
-		}
-		remote, err = ftp.NewFs(ctx, endpoint.ID, endpoint.RemotePath, options)
-	case config.SFTP:
-		if endpoint.KnownHostsFile != "" {
-			options["known_hosts_file"] = endpoint.KnownHostsFile
-		}
-		remote, err = sftp.NewFs(ctx, endpoint.ID, endpoint.RemotePath, options)
-	default:
-		return nil, fmt.Errorf("unsupported protocol %q", endpoint.Protocol)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("connect to %s: %w", endpoint.Host, err)
-	}
-
-	mountOptions := mountlib.Opt
-	mountOptions.VolumeName = endpoint.Name
-	// User mounts behave as fixed drives so Explorer's standard Rename action
-	// maps to SetVolumeLabel. SYSTEM mounts need network mode to cross logon
-	// session drive namespaces.
-	mountOptions.NetworkMode = endpoint.Scope == config.System
-	vfsOptions := vfscommon.Opt
+	mountOptions, vfsOptions := mountSettings(spec.Endpoint)
 	point := mountlib.NewMountPoint(
 		mount,
-		endpoint.DriveLetter+":",
+		spec.Endpoint.DriveLetter+":",
 		remote,
 		&mountOptions,
 		&vfsOptions,
 	)
 	if _, err := point.Mount(); err != nil {
+		release()
+		shutdownFs(remote)
 		return nil, err
 	}
-	return windowsHandle{point: point}, nil
+	return &windowsHandle{point: point, release: release}, nil
+}
+
+func (windowsEngine) Probe(ctx context.Context, spec Spec) error {
+	return probe(ctx, spec)
 }

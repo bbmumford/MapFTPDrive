@@ -17,7 +17,8 @@ func Run(ctx context.Context, scope config.Scope) error {
 	if err != nil {
 		return err
 	}
-	supervisor := app.NewSupervisor(config.NewStore(path), credentials.NewStore(), mount.NewEngine())
+	engine := mount.NewEngine(mount.Options{CacheDir: config.LayoutFor(path).CacheRoot()})
+	supervisor := app.NewSupervisor(config.NewStore(path), credentials.NewStore(), engine)
 	// A failed restored endpoint must not prevent the host from accepting
 	// repair, remove, or remount commands for the remaining endpoints.
 	_ = supervisor.Start(ctx)

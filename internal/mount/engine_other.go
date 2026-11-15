@@ -2,18 +2,20 @@
 
 package mount
 
-import (
-	"context"
+import "context"
 
-	"mapftpdrive/internal/config"
-)
-
-type unsupportedEngine struct{}
+// otherEngine cannot mount (WinFsp is Windows-only) but probes connections
+// with the same rclone backends, which keeps connection logic testable.
+type otherEngine struct{}
 
 func newPlatformEngine() Engine {
-	return unsupportedEngine{}
+	return otherEngine{}
 }
 
-func (unsupportedEngine) Mount(context.Context, config.Endpoint, Secret) (Handle, error) {
+func (otherEngine) Mount(context.Context, Spec) (Handle, error) {
 	return nil, ErrNotSupported
+}
+
+func (otherEngine) Probe(ctx context.Context, spec Spec) error {
+	return probe(ctx, spec)
 }

@@ -120,18 +120,18 @@ func (s *Supervisor) Mount(ctx context.Context, endpoint config.Endpoint) error 
 	if username != "" {
 		endpoint.Username = username
 	}
+	var knownHostsFile string
 	if endpoint.Protocol == config.SFTP && endpoint.KnownHost != "" {
 		layout := config.LayoutFor(s.store.Path())
 		if err := os.MkdirAll(layout.KnownHostsDir(), 0o700); err != nil {
 			return err
 		}
-		knownHostsFile := layout.KnownHostsFile(endpoint.ID)
+		knownHostsFile = layout.KnownHostsFile(endpoint.ID)
 		if err := os.WriteFile(knownHostsFile, []byte(endpoint.KnownHost+"\n"), 0o600); err != nil {
 			return err
 		}
-		endpoint.KnownHostsFile = knownHostsFile
 	}
-	handle, err := s.engine.Mount(ctx, endpoint, mount.Secret{Password: password})
+	handle, err := s.engine.Mount(ctx, mount.Spec{Endpoint: endpoint, Secret: mount.Secret{Password: password}, KnownHostsFile: knownHostsFile})
 	if err != nil {
 		return err
 	}

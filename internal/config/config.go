@@ -73,7 +73,6 @@ type Endpoint struct {
 	KeyFile        string     `json:"keyFile,omitempty"`
 	KnownHost      string     `json:"knownHost,omitempty"`
 	CertificatePin string     `json:"certificatePin,omitempty"`
-	KnownHostsFile string     `json:"-"`
 }
 
 // DefaultPort returns the conventional port for a protocol and FTPS mode:

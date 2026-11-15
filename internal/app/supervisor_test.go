@@ -52,10 +52,12 @@ type fakeEngine struct {
 	mounted chan config.Endpoint
 }
 
-func (f *fakeEngine) Mount(_ context.Context, endpoint config.Endpoint, _ mount.Secret) (mount.Handle, error) {
-	f.mounted <- endpoint
+func (f *fakeEngine) Mount(_ context.Context, spec mount.Spec) (mount.Handle, error) {
+	f.mounted <- spec.Endpoint
 	return newFakeHandle(), nil
 }
+
+func (f *fakeEngine) Probe(context.Context, mount.Spec) error { return nil }
 
 func TestSupervisorRestoresAndUnmounts(t *testing.T) {
 	store := config.NewStore(filepath.Join(t.TempDir(), "endpoints.json"))
