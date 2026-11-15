@@ -10,6 +10,9 @@
 #ifndef WinFspMsi
   #define WinFspMsi "..\build\winfsp.msi"
 #endif
+#ifndef WinFspVersion
+  #define WinFspVersion "2.1.25156"
+#endif
 #ifndef SigningSuffix
   #define SigningSuffix "-unsigned"
 #endif
@@ -52,7 +55,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#Binary}"; DestDir: "{app}"; DestName: "MapFTPDrive.exe"; Flags: ignoreversion
-Source: "{#WinFspMsi}"; DestDir: "{tmp}"; DestName: "winfsp.msi"; Flags: deleteafterinstall
+; Extracted and run by InstallWinFsp only when WinFsp is missing or older.
+Source: "{#WinFspMsi}"; DestDir: "{tmp}"; DestName: "winfsp.msi"; Flags: dontcopy
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -95,9 +99,140 @@ Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove"; ValueType:
 Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" remove --drive ""%V."""
 
 [Run]
-Filename: "{sys}\msiexec.exe"; Parameters: "/i ""{tmp}\winfsp.msi"" /qn /norestart"; StatusMsg: "Installing the WinFsp filesystem runtime..."; Flags: waituntilterminated
-Filename: "{app}\MapFTPDrive.exe"; Parameters: "install"; StatusMsg: "Securing MapFTPDrive data and installing its service..."; Flags: runhidden waituntilterminated
 Filename: "{app}\MapFTPDrive.exe"; Description: "Launch MapFTPDrive"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{app}\MapFTPDrive.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveExplorerIntegration"
+
+[Code]
+const
+  BundledWinFspVersion = '{#WinFspVersion}';
+
+var
+  RestartRequired: Boolean;
+
+{ NextVersionPart removes and returns the leading dotted component of S. }
+function NextVersionPart(var S: String): Integer;
+var
+  Dot: Integer;
+begin
+  Dot := Pos('.', S);
+  if Dot = 0 then
+  begin
+    Result := StrToIntDef(S, 0);
+    S := '';
+  end
+  else
+  begin
+    Result := StrToIntDef(Copy(S, 1, Dot - 1), 0);
+    Delete(S, 1, Dot);
+  end;
+end;
+
+{ CompareVersions compares dotted numeric versions: -1, 0 or 1. }
+function CompareVersions(A, B: String): Integer;
+var
+  PartA, PartB: Integer;
+begin
+  Result := 0;
+  while (Result = 0) and ((A <> '') or (B <> '')) do
+  begin
+    PartA := NextVersionPart(A);
+    PartB := NextVersionPart(B);
+    if PartA < PartB then
+      Result := -1
+    else if PartA > PartB then
+      Result := 1;
+  end;
+end;
+
+{ InstalledWinFspVersion reads the ProductVersion the WinFsp MSI records in
+  its 32-bit registry key, or '' when WinFsp is absent. }
+function InstalledWinFspVersion: String;
+begin
+  if not RegQueryStringValue(HKLM32, 'SOFTWARE\WinFsp', 'Version', Result) then
+    Result := '';
+end;
+
+{ InstallWinFsp installs the bundled WinFsp MSI unless the same or a newer
+  WinFsp is present: WinFsp is a shared runtime, and its MSI refuses a
+  downgrade. It returns '' to continue Setup, or the message Setup shows
+  before stopping. A 3010 result continues and asks for a restart at the
+  end, because the runtime is in place once Windows restarts. }
+function InstallWinFsp: String;
+var
+  Installed, LogFile, Parameters: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  Installed := InstalledWinFspVersion;
+  if (Installed <> '') and (CompareVersions(Installed, BundledWinFspVersion) >= 0) then
+  begin
+    Log('WinFsp ' + Installed + ' is installed; the bundled ' + BundledWinFspVersion + ' is not needed.');
+    Exit;
+  end;
+  ExtractTemporaryFile('winfsp.msi');
+  LogFile := ExpandConstant('{%TEMP}\MapFTPDrive-WinFsp-install.log');
+  Parameters := '/i "' + ExpandConstant('{tmp}\winfsp.msi') + '" /qn /norestart /l*v "' + LogFile + '"';
+  if not Exec(ExpandConstant('{sys}\msiexec.exe'), Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := 'Windows Installer could not be started to install WinFsp: ' + SysErrorMessage(ResultCode);
+    Exit;
+  end;
+  Log('WinFsp installer exit code: ' + IntToStr(ResultCode));
+  case ResultCode of
+    0: Log('WinFsp ' + BundledWinFspVersion + ' installed.');
+    3010: RestartRequired := True;
+    1638: Log('Another WinFsp version is installed and is kept.');
+    1618: Result := 'Another installation is in progress. Wait for it to finish, then run MapFTPDrive Setup again.';
+    1602: Result := 'The WinFsp installation was cancelled.';
+    1603: Result := 'WinFsp could not be installed (Windows Installer error 1603). '
+      + 'If an older WinFsp release is installed, uninstall it from Settings, Apps and run Setup again. '
+      + 'Details are in ' + LogFile + '.';
+  else
+    Result := 'WinFsp could not be installed (Windows Installer error ' + IntToStr(ResultCode) + '). '
+      + 'Details are in ' + LogFile + '.';
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := InstallWinFsp;
+end;
+
+function NeedRestart: Boolean;
+begin
+  Result := RestartRequired;
+end;
+
+{ RunInstallStep runs "MapFTPDrive.exe install", which secures the system
+  data directory, removes per-user registration and installs, updates and
+  restarts the service. The program writes its error to stderr, which is
+  captured so a failure is reported instead of passing silently. }
+procedure RunInstallStep;
+var
+  ResultCode: Integer;
+  ErrorFile: String;
+  Details: AnsiString;
+begin
+  ErrorFile := ExpandConstant('{tmp}\install-step-error.txt');
+  if Exec(ExpandConstant('{cmd}'),
+      '/C ""' + ExpandConstant('{app}\MapFTPDrive.exe') + '" install 2>"' + ErrorFile + '""',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+    Exit;
+  if not LoadStringFromFile(ErrorFile, Details) then
+    Details := '';
+  Log('MapFTPDrive install step failed with exit code ' + IntToStr(ResultCode) + ': ' + String(Details));
+  SuppressibleMsgBox('MapFTPDrive was copied, but its data directory or system service could not be set up:'
+    + #13#10#13#10 + Trim(String(Details)) + #13#10#13#10
+    + 'Run Setup again to repair the installation.', mbError, MB_OK, IDOK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    WizardForm.StatusLabel.Caption := 'Securing MapFTPDrive data and installing its service...';
+    RunInstallStep;
+  end;
+end;

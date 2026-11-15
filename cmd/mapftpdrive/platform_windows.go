@@ -9,13 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 	"mapftpdrive/internal/app"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/control"
@@ -25,40 +23,6 @@ import (
 	"mapftpdrive/internal/service"
 	"mapftpdrive/internal/ui"
 )
-
-func installDependencies(winfspMSI string) error {
-	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `Software\WinFsp`, registry.QUERY_VALUE|registry.WOW64_32KEY)
-	if err == nil {
-		_ = key.Close()
-		return nil
-	}
-	if !errors.Is(err, registry.ErrNotExist) {
-		return fmt.Errorf("check WinFsp installation: %w", err)
-	}
-
-	// This command is launched asynchronously by the parent MSI. Windows
-	// Installer may still own its global transaction mutex for a few seconds,
-	// so retry ERROR_INSTALL_ALREADY_RUNNING rather than racing the parent.
-	const alreadyRunning = 1618
-	var lastErr error
-	for attempt := 0; attempt < 60; attempt++ {
-		command := exec.Command(
-			filepath.Join(os.Getenv("SystemRoot"), "System32", "msiexec.exe"),
-			"/i", winfspMSI, "/qn", "/norestart",
-		)
-		if err := command.Run(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-			var exitErr *exec.ExitError
-			if !errors.As(err, &exitErr) || exitErr.ExitCode() != alreadyRunning {
-				return fmt.Errorf("install bundled WinFsp runtime: %w", err)
-			}
-		}
-		time.Sleep(time.Second)
-	}
-	return fmt.Errorf("install bundled WinFsp runtime after waiting for Windows Installer: %w", lastErr)
-}
 
 func launchUI(scope config.Scope) error {
 	if scope == config.System && !windows.GetCurrentProcessToken().IsElevated() {

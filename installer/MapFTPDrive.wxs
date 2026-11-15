@@ -20,14 +20,21 @@
           Type="raw"
           Bitness="always32" />
     </Property>
+    <!--
+      This package does not carry WinFsp. The setup bundle
+      (MapFTPDrive.bundle.wxs) installs WinFsp before it; administrators who
+      deploy this MSI on its own deploy WinFsp 2.1 or later first.
+    -->
+    <Launch
+        Condition="Installed OR WINFSPINSTALLDIR"
+        Message="MapFTPDrive requires the WinFsp 2.1 runtime or later. Run the MapFTPDrive setup bundle, which includes WinFsp, or install WinFsp from https://winfsp.dev before this package." />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="MapFTPDrive">
-        <Component Id="ApplicationFiles" Guid="D658388E-AF81-42E2-8180-0798A4DD050F">
+        <Component Id="ApplicationFiles" Guid="2858DFBA-C85A-4007-80D7-99606FD74ACD">
           <File Id="MapFTPDriveExe" Source="$(var.Binary)" KeyPath="yes" />
           <File Id="LicenseFile" Source="$(var.RepoRoot)\LICENSE" />
           <File Id="ReadmeFile" Source="$(var.RepoRoot)\README.md" />
-          <File Id="WinFspMsi" Source="$(var.WinFspMsi)" Name="winfsp-runtime.msi" />
           <ServiceInstall
               Id="MapFTPDriveServiceInstall"
               Name="MapFTPDrive"
@@ -142,22 +149,8 @@
         Execute="deferred"
         Impersonate="no"
         Return="check" />
-
-    <!--
-      Windows Installer forbids a nested MSI transaction. Launch the embedded
-      dependency helper without waiting; it retries until this package releases
-      the installer mutex, then silently installs WinFsp as LocalSystem.
-    -->
-    <CustomAction
-        Id="InstallBundledWinFsp"
-        FileRef="MapFTPDriveExe"
-        ExeCommand="install-dependencies --winfsp &quot;[INSTALLFOLDER]winfsp-runtime.msi&quot;"
-        Execute="deferred"
-        Impersonate="no"
-        Return="asyncNoWait" />
     <InstallExecuteSequence>
       <Custom Action="PrepareSystemData" Before="StartServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
-      <Custom Action="InstallBundledWinFsp" After="InstallFiles" Condition="NOT Installed AND NOT WINFSPINSTALLDIR" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

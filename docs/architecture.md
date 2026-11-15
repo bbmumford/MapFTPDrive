@@ -137,29 +137,40 @@ and service commands report failure only through their exit code.
 
 ## Installation and dependencies
 
-The Inno Setup EXE and WiX MSI both embed the same pinned WinFsp 2.1
-redistributable. The build downloads that exact upstream MSI and verifies
-its SHA-256 before packaging.
+The Inno Setup EXE and the WiX Burn bundle both carry the same pinned
+WinFsp 2.1 redistributable, the unmodified upstream MSI. The build
+downloads that exact file and verifies its SHA-256 before packaging; Burn
+also records the payload hash and verifies it before running it.
 
-The EXE runs WinFsp synchronously before registering MapFTPDrive. An MSI
-cannot start another MSI while its own transaction owns the global Windows
-Installer mutex. The MapFTPDrive MSI therefore installs the WinFsp payload
-alongside the application and starts `install-dependencies` as LocalSystem
-without waiting. That helper:
+A Windows Installer transaction cannot run another MSI, so WinFsp is never
+installed from inside the MapFTPDrive MSI:
 
-1. checks the 32-bit `HKLM\Software\WinFsp` installation entry;
-2. returns immediately when WinFsp is already installed;
-3. invokes the embedded MSI silently when it is absent; and
-4. retries Windows Installer error 1618 until the parent transaction exits.
+- The EXE installs WinFsp from `PrepareToInstall`, before any MapFTPDrive
+  file is copied. It reads the installed version from the 32-bit
+  `HKLM\SOFTWARE\WinFsp` `Version` value, skips WinFsp when the same or a
+  newer version is present (the WinFsp MSI refuses downgrades), and maps
+  `msiexec` results: 0 continues; 3010 continues and requests a restart at
+  the end; 1638 keeps the installed version; 1618, 1602 and 1603 stop Setup
+  with a message naming the WinFsp log.
+- The Burn bundle (`installer/MapFTPDrive.bundle.wxs`) chains the WinFsp MSI
+  and the MapFTPDrive MSI as separate transactions run by the Burn engine,
+  which also handles restart results (3010) and the installer mutex. A
+  product search on WinFsp's upgrade code skips the WinFsp package when an
+  equal or newer release is installed, and a launch condition stops before
+  any change when an older WinFsp that its MSI cannot upgrade is present.
+  The WinFsp package is `Permanent`, so removing the bundle leaves it.
+- The plain MapFTPDrive MSI carries no WinFsp. A launch condition refuses
+  installation while the `HKLM\SOFTWARE\WinFsp` `InstallDir` value is
+  missing, for administrators who deploy WinFsp themselves.
 
-The runtime payload remains owned by the MapFTPDrive MSI for repair and
-upgrade integrity. MapFTPDrive uninstall does not remove the shared WinFsp
-runtime.
+MapFTPDrive uninstall never removes the shared WinFsp runtime.
 
-Release packaging builds x64 and ARM64 setup EXEs and MSIs. Authenticode
-signing is enabled only when both signing secrets are present. Unsigned
-artifacts receive `-unsigned`; signed artifacts receive no suffix. SHA-256
-files, a combined manifest, and provenance attestations accompany releases.
+Release packaging builds x64 and ARM64 setup EXEs, setup bundles and MSIs.
+Authenticode signing is enabled only when both signing secrets are present;
+the bundle's Burn engine is detached, signed and reattached before the
+bundle itself is signed. Unsigned artifacts receive `-unsigned`; signed
+artifacts receive no suffix. SHA-256 files, a combined manifest, and
+provenance attestations accompany releases.
 
 ## Upstream source
 

@@ -24,8 +24,10 @@ requiring an external `rclone.exe`.
   or SFTP.
 - Preserve GPLv3 source availability, upstream notices, and exact provenance
   whenever vendored or extracted source changes.
-- Both release installer formats are all-in-one: a clean supported Windows
-  machine must not require a separate WinFsp download or preinstallation.
+- Both setup programs (the Inno Setup EXE and the WiX Burn bundle) are
+  all-in-one: a clean supported Windows machine must not require a separate
+  WinFsp download or preinstallation. The plain MSI is for administrators
+  who deploy WinFsp themselves and refuses to install without it.
 - WinFsp is a shared machine runtime. Detect an existing installation, never
   remove it during MapFTPDrive uninstall, and never attempt a synchronous
   nested MSI transaction.
@@ -66,11 +68,13 @@ logout/login restoration, service restart restoration, credential deletion,
 and occupied-drive-letter handling.
 
 Installer changes additionally require a release-workflow dry run for both
-x64 and ARM64. Smoke-test both output formats on clean Windows without
-WinFsp and on Windows with WinFsp already installed. Confirm the MSI's
-asynchronous dependency helper handles Windows Installer error 1618, WinFsp
-is usable before the first mount, repair succeeds, and uninstall leaves the
-shared WinFsp runtime installed.
+x64 and ARM64. Smoke-test the setup EXE and the setup bundle on clean
+Windows without WinFsp, with the bundled WinFsp version installed and with a
+newer one installed; confirm an equal or newer WinFsp is kept, a 3010 result
+ends with a restart request, WinFsp is usable before the first mount,
+repair succeeds, and uninstall leaves the shared WinFsp runtime installed.
+Confirm the plain MSI refuses to install without WinFsp and installs once
+it is present.
 
 ## Release policy
 
@@ -105,6 +109,6 @@ security update remains auditable.
 The WinFsp runtime is distributed as its unmodified upstream MSI. Do not
 unpack and re-author its driver components into the MapFTPDrive MSI: doing so
 would compromise Windows Installer servicing and upstream signature
-boundaries. The EXE installs it synchronously; the MSI embeds it and delegates
-installation to the LocalSystem `install-dependencies` helper after the
-parent transaction releases the installer mutex.
+boundaries. The EXE runs it before copying MapFTPDrive files; the Burn
+bundle chains it as a separate, permanent package before the MapFTPDrive
+MSI.

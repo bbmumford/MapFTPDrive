@@ -22,10 +22,9 @@ and any suggested mitigation. Never include real endpoint credentials.
 - User and system control pipes have explicit SID-based ACLs.
 - System operations require membership in Administrators and UAC elevation.
 - Release dependencies are vendored or version-and-hash pinned.
-- Both installers embed the exact pinned WinFsp redistributable. Packaging
-  fails if its SHA-256 does not match the reviewed value.
-- The MSI launches its WinFsp dependency helper as LocalSystem without
-  placing credentials or user-controlled data in its command line.
+- Both setup programs embed the exact pinned WinFsp redistributable.
+  Packaging fails if its SHA-256 does not match the reviewed value, and the
+  Burn bundle verifies the payload hash again before running it.
 - Release artifacts include SHA-256 manifests and GitHub provenance
   attestations.
 
