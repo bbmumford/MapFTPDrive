@@ -3,22 +3,76 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"mapftpdrive/internal/buildinfo"
 	"mapftpdrive/internal/config"
+	"mapftpdrive/internal/logging"
+	"mapftpdrive/internal/ui"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	args := os.Args[1:]
+	logger := commandLogger(args)
+	if err := run(args); err != nil {
+		logger.Error("command failed", "command", commandName(args), "error", err)
+		// The executable is a GUI-subsystem program with no console, so
+		// interactive commands also report failures in a message box unless
+		// the command already showed this error itself.
+		if interactive(args) && !ui.WasShown(err) {
+			ui.ShowError("MapFTPDrive", err)
+		}
 		fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
 		os.Exit(1)
 	}
 }
 
+func commandName(args []string) string {
+	if len(args) == 0 {
+		return "manage"
+	}
+	return args[0]
+}
+
+// interactive reports commands started by a person (Start menu, Explorer
+// verbs) as opposed to installers, the service manager or the sign-in Run
+// entry, which must never block on a message box.
+func interactive(args []string) bool {
+	switch commandName(args) {
+	case "install", "uninstall", "install-dependencies", "service", "daemon", "version":
+		return false
+	}
+	return true
+}
+
+// commandLogger opens the user's log for every command except the hosts,
+// which open their own scope's log in host.Run.
+func commandLogger(args []string) *logging.Logger {
+	switch commandName(args) {
+	case "service", "daemon":
+		return logging.Discard()
+	}
+	path, err := config.DefaultPath(config.User)
+	if err != nil {
+		return logging.Discard()
+	}
+	logger, _ := logging.Open(logging.Options{Dir: config.LayoutFor(path).LogDir()})
+	slog.SetDefault(logger.Logger)
+	return logger
+}
+
+func parseScope(value string) (config.Scope, error) {
+	scope := config.Scope(value)
+	if scope != config.User && scope != config.System {
+		return "", fmt.Errorf("--scope must be %q or %q", config.User, config.System)
+	}
+	return scope, nil
+}
+
 func run(args []string) error {
 	if len(args) == 0 {
-		return launchUI(config.User)
+		return runManager()
 	}
 	switch args[0] {
 	case "map":
@@ -27,7 +81,13 @@ func run(args []string) error {
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		return launchUI(config.Scope(*scope))
+		parsed, err := parseScope(*scope)
+		if err != nil {
+			return err
+		}
+		return runMapper(parsed)
+	case "manage":
+		return runManager()
 	case "install":
 		return installExplorerIntegration()
 	case "install-dependencies":

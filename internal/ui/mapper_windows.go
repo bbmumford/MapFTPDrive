@@ -3,8 +3,8 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/lxn/walk"
@@ -13,150 +13,250 @@ import (
 	"mapftpdrive/internal/config"
 )
 
-func showMapper(scope config.Scope) (MapperResult, error) {
-	var window *walk.MainWindow
-	var nameEdit, hostEdit, portEdit, userEdit, passwordEdit, pathEdit *walk.LineEdit
+// showMapper runs the map/edit dialog. With options.Submit set, the dialog
+// stays open while the submission (identity prompts, test, mount, save)
+// runs in the background and closes only when it succeeds, so a failed
+// attempt never loses what the user typed.
+func showMapper(options MapperOptions) (MapperResult, error) {
+	return runMapperDialog(nil, options)
+}
+
+func runMapperDialog(owner walk.Form, options MapperOptions) (MapperResult, error) {
+	var dialog *walk.Dialog
+	var nameEdit, hostEdit, portEdit, userEdit, passwordEdit, keyEdit, pathEdit *walk.LineEdit
 	var protocolBox, driveBox *walk.ComboBox
+	var keyCheck *walk.CheckBox
+	var keyButton, cancelButton, okButton *walk.PushButton
+	var passwordLabel, warningLabel, statusLabel *walk.Label
 	var result MapperResult
-	cancelled := true
-	protocols := []string{"SFTP", "FTPS (explicit TLS)", "FTPS (implicit TLS)", "FTP (unencrypted)"}
-	drives := availableDriveLetters()
+	accepted := false
+	busy := false
+
+	values := FormValues{Scope: options.Scope, Port: DefaultPortText(0)}
+	editing := options.Initial != nil
+	if editing {
+		values = FormFor(*options.Initial)
+	}
+	if options.Usage.Mask == 0 {
+		if mask, err := windows.GetLogicalDrives(); err == nil {
+			options.Usage.Mask = mask
+		}
+	}
+	drives := AvailableLetters(options.Scope, values.Drive, options.Usage)
+	if len(drives) == 0 {
+		drives = []string{"Z:"}
+	}
+	driveIndex := 0
+	for index, drive := range drives {
+		if strings.EqualFold(drive, values.Drive) {
+			driveIndex = index
+		}
+	}
+	previousProtocol := values.ProtocolIndex
 
 	title := "Map FTP Drive"
-	if scope == config.System {
-		title += " — system-wide"
+	okText := "Map Drive"
+	passwordText := "Password:"
+	if editing {
+		title = "Edit FTP Drive"
+		okText = "Save"
 	}
-	_, err := (MainWindow{
-		AssignTo: &window,
-		Title:    title,
-		MinSize:  Size{Width: 520, Height: 430},
-		Layout:   VBox{MarginsZero: false},
+	if options.Scope == config.System {
+		title += " (system-wide)"
+	}
+
+	refresh := func() {
+		protocol, _ := ProtocolAt(protocolBox.CurrentIndex())
+		sftp := protocol == config.SFTP
+		if !sftp && keyCheck.Checked() {
+			keyCheck.SetChecked(false)
+		}
+		keyCheck.SetEnabled(sftp && !busy)
+		useKey := keyCheck.Checked()
+		keyEdit.SetEnabled(useKey && !busy)
+		keyButton.SetEnabled(useKey && !busy)
+		label := "Password:"
+		if useKey {
+			label = "Key passphrase:"
+		}
+		if editing {
+			label = strings.TrimSuffix(label, ":") + " (blank keeps it):"
+		}
+		passwordLabel.SetText(label)
+		switch {
+		case protocol == config.FTP:
+			warningLabel.SetText("FTP sends credentials and data without encryption. Prefer SFTP or FTPS.")
+		case options.Scope == config.System:
+			warningLabel.SetText("System-wide drives are available to every user of this computer with these credentials.")
+		default:
+			warningLabel.SetText("")
+		}
+	}
+	setBusy := func(state bool, message string) {
+		busy = state
+		for _, widget := range []walk.Widget{nameEdit, hostEdit, portEdit, userEdit, passwordEdit, pathEdit, protocolBox, driveBox, okButton} {
+			widget.SetEnabled(!state)
+		}
+		statusLabel.SetText(message)
+		refresh()
+	}
+	submit := func() {
+		if busy {
+			return
+		}
+		form := FormValues{
+			Scope:         options.Scope,
+			Name:          nameEdit.Text(),
+			ProtocolIndex: protocolBox.CurrentIndex(),
+			Host:          hostEdit.Text(),
+			Port:          portEdit.Text(),
+			Username:      userEdit.Text(),
+			UseKey:        keyCheck.Checked(),
+			KeyFile:       keyEdit.Text(),
+			Password:      passwordEdit.Text(),
+			RemotePath:    pathEdit.Text(),
+			Drive:         driveBox.Text(),
+		}
+		built, err := BuildResult(form)
+		if err == nil {
+			editingID := ""
+			if editing {
+				editingID = options.Initial.ID
+			}
+			err = CheckLetter(built.Endpoint, editingID, options.Usage)
+		}
+		if err != nil {
+			walk.MsgBox(dialog, "Check the drive details", err.Error(), walk.MsgBoxIconWarning)
+			return
+		}
+		if options.Submit == nil {
+			result, accepted = built, true
+			dialog.Accept()
+			return
+		}
+		setBusy(true, "Connecting to "+built.Endpoint.Host+"…")
+		go func() {
+			submitErr := options.Submit(built, walkPrompter{owner: dialog})
+			dialog.Synchronize(func() {
+				setBusy(false, "")
+				switch {
+				case submitErr == nil:
+					result, accepted = built, true
+					dialog.Accept()
+				case errors.Is(submitErr, ErrCancelled):
+				default:
+					walk.MsgBox(dialog, "Unable to "+strings.ToLower(okText)+" the drive", submitErr.Error(), walk.MsgBoxIconError)
+				}
+			})
+		}()
+	}
+
+	err := (Dialog{
+		AssignTo:      &dialog,
+		Title:         title,
+		MinSize:       Size{Width: 560, Height: 470},
+		Layout:        VBox{},
+		DefaultButton: &okButton,
+		CancelButton:  &cancelButton,
 		Children: []Widget{
-			Label{
-				Text: "Create a persistent Windows drive backed by an FTP-family endpoint.",
-			},
 			Composite{
-				Layout: Grid{Columns: 2, Spacing: 8},
+				Layout: Grid{Columns: 3, Spacing: 8},
 				Children: []Widget{
 					Label{Text: "Drive name:"},
-					LineEdit{AssignTo: &nameEdit},
+					LineEdit{AssignTo: &nameEdit, Text: values.Name, MaxLength: config.MaxNameLength, ColumnSpan: 2},
 					Label{Text: "Protocol:"},
-					ComboBox{AssignTo: &protocolBox, Model: protocols, CurrentIndex: 0},
+					ComboBox{
+						AssignTo:     &protocolBox,
+						Model:        ProtocolChoices,
+						CurrentIndex: values.ProtocolIndex,
+						ColumnSpan:   2,
+						OnCurrentIndexChanged: func() {
+							next := protocolBox.CurrentIndex()
+							portEdit.SetText(NextPortText(portEdit.Text(), previousProtocol, next))
+							previousProtocol = next
+							refresh()
+						},
+					},
 					Label{Text: "Server:"},
-					LineEdit{AssignTo: &hostEdit},
+					LineEdit{AssignTo: &hostEdit, Text: values.Host, ColumnSpan: 2},
 					Label{Text: "Port:"},
-					LineEdit{AssignTo: &portEdit, Text: "22"},
+					LineEdit{AssignTo: &portEdit, Text: values.Port, MaxLength: 5, ColumnSpan: 2},
 					Label{Text: "Username:"},
-					LineEdit{AssignTo: &userEdit},
-					Label{Text: "Password:"},
-					LineEdit{AssignTo: &passwordEdit, PasswordMode: true},
+					LineEdit{AssignTo: &userEdit, Text: values.Username, ColumnSpan: 2},
+					HSpacer{},
+					CheckBox{
+						AssignTo:         &keyCheck,
+						Text:             "Log in with a private key (SFTP)",
+						Checked:          values.UseKey,
+						ColumnSpan:       2,
+						OnCheckedChanged: func() { refresh() },
+					},
+					Label{Text: "Key file:"},
+					LineEdit{AssignTo: &keyEdit, Text: values.KeyFile},
+					PushButton{
+						AssignTo: &keyButton,
+						Text:     "Browse…",
+						OnClicked: func() {
+							picker := walk.FileDialog{Title: "Choose the private key file", Filter: "All files (*.*)|*.*"}
+							if ok, _ := picker.ShowOpen(dialog); ok {
+								keyEdit.SetText(picker.FilePath)
+							}
+						},
+					},
+					Label{AssignTo: &passwordLabel, Text: passwordText},
+					LineEdit{AssignTo: &passwordEdit, PasswordMode: true, ColumnSpan: 2},
 					Label{Text: "Remote path:"},
-					LineEdit{AssignTo: &pathEdit},
+					LineEdit{AssignTo: &pathEdit, Text: values.RemotePath, ColumnSpan: 2},
 					Label{Text: "Drive letter:"},
-					ComboBox{AssignTo: &driveBox, Model: drives, CurrentIndex: 0},
+					ComboBox{AssignTo: &driveBox, Model: drives, CurrentIndex: driveIndex, ColumnSpan: 2},
 				},
 			},
-			Label{
-				Text: "FTP sends credentials and data without encryption. Prefer SFTP or FTPS.",
-			},
+			Label{AssignTo: &warningLabel},
+			Label{AssignTo: &statusLabel},
+			VSpacer{},
 			Composite{
 				Layout: HBox{},
 				Children: []Widget{
 					HSpacer{},
 					PushButton{
-						Text: "Cancel",
+						AssignTo: &cancelButton,
+						Text:     "Cancel",
 						OnClicked: func() {
-							window.Close()
+							if !busy {
+								dialog.Cancel()
+							}
 						},
 					},
-					PushButton{
-						Text: "Map Drive",
-						OnClicked: func() {
-							port, parseErr := strconv.ParseUint(strings.TrimSpace(portEdit.Text()), 10, 16)
-							if parseErr != nil || port == 0 {
-								walk.MsgBox(window, "Invalid port", "Enter a port from 1 through 65535.", walk.MsgBoxIconWarning)
-								return
-							}
-							protocol := config.SFTP
-							var tlsMode config.TLSMode
-							switch protocolBox.CurrentIndex() {
-							case 1:
-								protocol = config.FTPS
-								tlsMode = config.TLSExplicit
-							case 2:
-								protocol = config.FTPS
-								tlsMode = config.TLSImplicit
-							case 3:
-								protocol = config.FTP
-								answer := walk.MsgBox(window, "Unencrypted connection", "FTP is unencrypted. Continue anyway?", walk.MsgBoxYesNo|walk.MsgBoxIconWarning)
-								if answer != walk.DlgCmdYes {
-									return
-								}
-							}
-							result = MapperResult{
-								Endpoint: config.Endpoint{
-									Name:        nameEdit.Text(),
-									Protocol:    protocol,
-									TLSMode:     tlsMode,
-									Host:        hostEdit.Text(),
-									Port:        uint16(port),
-									Username:    userEdit.Text(),
-									DriveLetter: strings.TrimSuffix(driveBox.Text(), ":"),
-									RemotePath:  pathEdit.Text(),
-									Scope:       scope,
-								},
-								Password: passwordEdit.Text(),
-							}
-							probe := result.Endpoint
-							probe.ID = "pending"
-							probe.CredentialKey = "pending"
-							if validationErr := probe.Validate(); validationErr != nil {
-								walk.MsgBox(window, "Invalid endpoint", validationErr.Error(), walk.MsgBoxIconWarning)
-								return
-							}
-							cancelled = false
-							window.Close()
-						},
-					},
+					PushButton{AssignTo: &okButton, Text: okText, OnClicked: submit},
 				},
 			},
 		},
-	}).Run()
+	}).Create(owner)
 	if err != nil {
 		return MapperResult{}, err
 	}
-	if cancelled {
+	// A submission in flight reports back through dialog.Synchronize, so
+	// the dialog must outlive it.
+	dialog.Closing().Attach(func(canceled *bool, _ walk.CloseReason) {
+		if busy {
+			*canceled = true
+		}
+	})
+	refresh()
+	dialog.Run()
+	if !accepted {
 		return MapperResult{}, ErrCancelled
 	}
 	return result, nil
 }
 
-func availableDriveLetters() []string {
-	mask, err := windows.GetLogicalDrives()
-	if err != nil {
-		mask = 0
-	}
-	var result []string
-	for letter := 'D'; letter <= 'Z'; letter++ {
-		bit := uint32(1) << (letter - 'A')
-		if mask&bit == 0 {
-			result = append(result, fmt.Sprintf("%c:", letter))
-		}
-	}
-	if len(result) == 0 {
-		result = append(result, "Z:")
-	}
-	return result
-}
-
 func confirmRemove(name, drive string) bool {
-	message := fmt.Sprintf("Remove %s (%s:) and delete its saved credential?", name, strings.TrimRight(drive, `:\`))
-	return walk.MsgBox(nil, "Remove FTP Drive", message, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) == walk.DlgCmdYes
+	return walk.MsgBox(nil, "Remove FTP Drive", RemovalMessage(name, drive), walk.MsgBoxYesNo|walk.MsgBoxIconWarning|walk.MsgBoxDefButton2) == walk.DlgCmdYes
 }
 
 func confirmHostKey(host, algorithm, fingerprint string) bool {
 	message := fmt.Sprintf(
-		"First connection to %s.\n\nHost key type: %s\nFingerprint: %s\n\nTrust and save this host key?",
+		"First connection to %s.\n\nHost key type: %s\nSHA-256 fingerprint: %s\n\nTrust and pin this host key?",
 		host,
 		algorithm,
 		fingerprint,
@@ -165,40 +265,51 @@ func confirmHostKey(host, algorithm, fingerprint string) bool {
 }
 
 func promptRename(current string) (string, error) {
+	return runRenameDialog(nil, current)
+}
+
+// runRenameDialog asks for a new drive name, validated as a volume label.
+func runRenameDialog(owner walk.Form, current string) (string, error) {
 	var dialog *walk.Dialog
 	var edit *walk.LineEdit
-	var accepted bool
+	var okButton, cancelButton *walk.PushButton
+	var name string
+	accepted := false
 	_, err := (Dialog{
-		AssignTo: &dialog,
-		Title:    "Rename FTP Drive",
-		MinSize:  Size{Width: 380, Height: 140},
-		Layout:   VBox{},
+		AssignTo:      &dialog,
+		Title:         "Rename FTP Drive",
+		MinSize:       Size{Width: 380, Height: 150},
+		Layout:        VBox{},
+		DefaultButton: &okButton,
+		CancelButton:  &cancelButton,
 		Children: []Widget{
-			Label{Text: "New drive name:"},
-			LineEdit{AssignTo: &edit, Text: current},
+			Label{Text: fmt.Sprintf("New drive name (up to %d characters, no \\ / or commas):", config.MaxNameLength)},
+			LineEdit{AssignTo: &edit, Text: current, MaxLength: config.MaxNameLength},
 			Composite{
 				Layout: HBox{},
 				Children: []Widget{
 					HSpacer{},
-					PushButton{Text: "Cancel", OnClicked: func() { dialog.Cancel() }},
-					PushButton{Text: "Rename", OnClicked: func() {
-						if strings.TrimSpace(edit.Text()) == "" {
+					PushButton{AssignTo: &cancelButton, Text: "Cancel", OnClicked: func() { dialog.Cancel() }},
+					PushButton{AssignTo: &okButton, Text: "Rename", OnClicked: func() {
+						candidate := strings.TrimSpace(edit.Text())
+						if err := config.ValidateName(candidate); err != nil {
+							walk.MsgBox(dialog, "Rename FTP Drive", err.Error(), walk.MsgBoxIconWarning)
 							return
 						}
-						accepted = true
+						name, accepted = candidate, true
 						dialog.Accept()
 					}},
 				},
 			},
 		},
-	}).Run(nil)
+	}).Run(owner)
 	if err != nil {
 		return "", err
 	}
 	if !accepted {
 		return "", ErrCancelled
 	}
-	return strings.TrimSpace(edit.Text()), nil
+	return name, nil
 }
 
 func showError(title string, err error) {
