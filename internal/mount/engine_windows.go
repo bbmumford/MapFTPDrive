@@ -4,6 +4,7 @@ package mount
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/rclone/rclone/cmd/mountlib"
@@ -56,6 +57,9 @@ func (windowsEngine) Mount(ctx context.Context, spec Spec) (Handle, error) {
 		release()
 		shutdownFs(remote)
 		return nil, err
+	}
+	if label, err := VolumeLabel(spec.Endpoint.DriveLetter); err == nil && label != spec.Endpoint.Name {
+		slog.Warn("volume label differs from the drive name", "drive", spec.Endpoint.DriveLetter, "label", label, "name", spec.Endpoint.Name)
 	}
 	return &windowsHandle{point: point, release: release}, nil
 }
