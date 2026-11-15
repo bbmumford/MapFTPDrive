@@ -25,6 +25,31 @@ process sends the definition and a protected credential to the installed
 service. Merely holding Shift does not silently grant system scope; Windows
 still displays its UAC consent UI.
 
+## Control pipes
+
+Mapping commands reach the hosts over named pipes:
+
+- `\\.\pipe\MapFTPDrive-system`, served by the LocalSystem service, with a
+  DACL admitting SYSTEM and Administrators (an elevated token).
+- `\\.\pipe\MapFTPDrive-user-<sid-hash>-<session>`, served by the user's
+  host in that logon session, admitting SYSTEM and that user. The session
+  number keeps one account signed in twice (console and Remote Desktop) on
+  separate hosts, each owning the drives of its own session.
+
+Pipe names are predictable and the first process to create a name serves
+it, so before writing a request (which may carry a password) the client
+asks Windows which process serves the pipe (`GetNamedPipeServerProcessId`)
+and reads that process's token. The system pipe must be served by
+`S-1-5-18`; a user pipe by the caller's own SID in the caller's session.
+Anything else fails closed with "the MapFTPDrive control pipe is served by
+an untrusted process" and no request is sent. Clients connect at the
+anonymous impersonation level, so a server can never impersonate them.
+
+Each request is bounded by `control.RequestTimeout` (two minutes) on both
+sides. The host answers `accepted` as soon as it has read a valid request
+and `working` every five seconds while a connect or mount is in progress;
+the client gives up if fifteen seconds pass without any message.
+
 ## Persistence
 
 User definitions live under `%LOCALAPPDATA%\MapFTPDrive`. System definitions

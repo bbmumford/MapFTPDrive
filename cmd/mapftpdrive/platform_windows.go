@@ -90,7 +90,7 @@ func launchUI(scope config.Scope) error {
 	if err := ensureHost(scope); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), control.RequestTimeout)
 	defer cancel()
 	err = control.Send(ctx, scope, control.Request{
 		Operation: control.SaveAndMount,
@@ -177,7 +177,7 @@ func runDriveAction(action, drive, name string) error {
 		return err
 	}
 	operation := control.Operation(action)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), control.RequestTimeout)
 	defer cancel()
 	return control.Send(ctx, scope, control.Request{Operation: operation, Drive: drive, Name: name})
 }
@@ -268,6 +268,10 @@ func ensureHost(scope config.Scope) error {
 	if err == nil {
 		return nil
 	}
+	// Another process holds the pipe name; a new host could not take it.
+	if errors.Is(err, control.ErrUntrustedHost) {
+		return err
+	}
 	if scope == config.System {
 		if err := service.EnsureStarted(); err != nil {
 			return err
@@ -292,8 +296,8 @@ func ensureHost(scope config.Scope) error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		err := control.Send(ctx, scope, control.Request{Operation: control.Ping})
 		cancel()
-		if err == nil {
-			return nil
+		if err == nil || errors.Is(err, control.ErrUntrustedHost) {
+			return err
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
