@@ -1,0 +1,78 @@
+version: "2"
+
+run:
+  # Release builds use the checked-in vendor tree; lint the same sources.
+  modules-download-mode: vendor
+
+linters:
+  # Every linter is listed explicitly so a golangci-lint upgrade cannot
+  # silently change the gate.
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+  settings:
+    errcheck:
+      exclude-functions:
+        # Releasing a Service Control Manager handle reports nothing the
+        # caller can act on, like the Close calls excluded below.
+        - (*golang.org/x/sys/windows/svc/mgr.Mgr).Disconnect
+    staticcheck:
+      checks:
+        - all
+        # Package comments are not required for internal packages.
+        - -ST1000
+        # Win32 identifiers keep their API spelling.
+        - -ST1003
+        # Quick fixes are suggestions, not defects.
+        - -QF*
+      # The walk declarative package is a DSL designed for dot import.
+      dot-import-whitelist:
+        - github.com/lxn/walk/declarative
+    gosec:
+      excludes:
+        # Unhandled errors are errcheck's job; reporting them twice adds noise.
+        - G104
+        # Win32 calls through golang.org/x/sys/windows require unsafe.Pointer
+        # conversions; each one is reviewed where the API is called.
+        - G103
+  exclusions:
+    generated: strict
+    presets:
+      # Unchecked Close, Flush and print calls on handles whose release
+      # error carries no action for the caller.
+      - std-error-handling
+    paths:
+      - vendor
+      - third_party
+    rules:
+      # The mount adapter is rclone's cmd/cmount with documented local patches
+      # (third_party/rclone/UPSTREAM.md). Its FUSE ABI integer conversions and
+      # style are upstream's and stay unchanged so security updates rebase
+      # cleanly.
+      - path: internal/mount/cmount_.*_windows\.go
+        linters:
+          - gosec
+        text: "G115:"
+      - path: internal/mount/cmount_.*_windows\.go
+        linters:
+          - staticcheck
+        text: "S1009:"
+      # User-facing errors may begin with the product names Windows and
+      # Explorer, which are capitalised.
+      - linters:
+          - staticcheck
+        text: "ST1005:"
+        source: 'errors\.New\("(Windows|Explorer) '
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - vendor
+      - third_party
