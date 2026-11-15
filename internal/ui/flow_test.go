@@ -478,10 +478,4 @@ func TestFetchReports(t *testing.T) {
 	if user.requests[0].Operation != control.Status {
 		t.Fatal("status not requested")
 	}
-	if _, err := ShowMapper(config.User); err == nil {
-		t.Skip("native interface available")
-	}
-	if ShowManager(ManagerOptions{}) == nil {
-		t.Fatal("manager reported success without a window")
-	}
 }

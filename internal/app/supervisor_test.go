@@ -404,17 +404,20 @@ func TestMapRollsBackWhenSavingFails(t *testing.T) {
 	if err := h.credentials.Put(key, "old-user", "old-secret"); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Dir(h.store.Path())
+	// A directory where the store file belongs makes the save fail on every
+	// OS once the mount has succeeded (directory permissions would not stop
+	// a write on Windows).
 	h.engine.onMount = func(mount.Spec) {
-		if err := os.Chmod(dir, 0o500); err != nil {
+		if err := os.Mkdir(h.store.Path(), 0o700); err != nil {
 			t.Error(err)
 		}
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	if _, err := h.supervisor.Map(context.Background(), endpoint, "secret"); err == nil {
 		t.Fatal("expected save failure")
 	}
-	_ = os.Chmod(dir, 0o700)
+	if err := os.Remove(h.store.Path()); err != nil {
+		t.Fatal(err)
+	}
 	if h.engine.live() != 0 {
 		t.Fatal("mount not undone after a failed save")
 	}

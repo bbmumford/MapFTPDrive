@@ -48,24 +48,29 @@ func TestDriveIndexRoundTrip(t *testing.T) {
 		t.Fatal("unexpected match")
 	}
 
-	tampered := `{"version":1,"drives":[{"drive":"C","scope":"system","id":"../x","name":"x"},{"drive":"1","scope":"system","id":"` + testID(1) + `"},{"drive":"D","scope":"root","id":"` + testID(1) + `"},{"drive":"E:","scope":"user","id":"` + testID(3) + `","name":"ok"}]}`
-	if err := os.WriteFile(path, []byte(tampered), 0o644); err != nil {
-		t.Fatal(err)
+	if err := WriteDriveIndex(path, System, []Endpoint{testEndpoint(3, "Q")}); err != nil {
+		t.Fatalf("an existing index must be replaceable: %v", err)
 	}
-	entries, err = ReadDriveIndex(path)
+
+	// The written index is read-only for Users on Windows, so hand-made
+	// variants go to separate files.
+	write := func(name, content string) string {
+		t.Helper()
+		variant := filepath.Join(dir, name)
+		if err := os.WriteFile(variant, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return variant
+	}
+	tampered := `{"version":1,"drives":[{"drive":"C","scope":"system","id":"../x","name":"x"},{"drive":"1","scope":"system","id":"` + testID(1) + `"},{"drive":"D","scope":"root","id":"` + testID(1) + `"},{"drive":"E:","scope":"user","id":"` + testID(3) + `","name":"ok"}]}`
+	entries, err = ReadDriveIndex(write("tampered.json", tampered))
 	if err != nil || len(entries) != 1 || entries[0].Drive != "E" {
 		t.Fatalf("tampered index = %+v, %v", entries, err)
 	}
-	if err := os.WriteFile(path, []byte(`{"version":7}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ReadDriveIndex(path); err == nil {
+	if _, err := ReadDriveIndex(write("newer.json", `{"version":7}`)); err == nil {
 		t.Fatal("newer index accepted")
 	}
-	if err := os.WriteFile(path, []byte(`[`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ReadDriveIndex(path); err == nil {
+	if _, err := ReadDriveIndex(write("corrupt.json", `[`)); err == nil {
 		t.Fatal("corrupt index accepted")
 	}
 }

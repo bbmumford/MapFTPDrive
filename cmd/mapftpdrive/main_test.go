@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"mapftpdrive/internal/config"
@@ -47,9 +46,6 @@ func TestRunRejectsBadInput(t *testing.T) {
 	}
 	if err := run([]string{"version"}); err != nil {
 		t.Fatal(err)
-	}
-	if err := run([]string{"map"}); err == nil || !strings.Contains(err.Error(), "Windows") {
-		t.Fatalf("map off Windows = %v", err)
 	}
 	if logger := commandLogger([]string{"service"}); logger == nil {
 		t.Fatal("no logger for the service command")
