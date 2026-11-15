@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"mapftpdrive/internal/buildinfo"
+	"mapftpdrive/internal/cleanup"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/explorer"
 	"mapftpdrive/internal/service"
@@ -52,9 +53,28 @@ func run(args []string) error {
 		return prepareSystemData()
 	case "configure-service":
 		return service.Configure()
-	case "uninstall":
-		return uninstallMachine()
+	case "uninstall", "uninstall-cleanup":
+		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+		keepData := flags.Bool("keep-data", false, "keep drive definitions, passwords and logs")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if args[0] == "uninstall" {
+			return uninstallMachine(*keepData)
+		}
+		return uninstallCleanup(*keepData)
+	case "purge-user":
+		return cleanup.PurgeCurrentUser()
 	case "service":
+		flags := flag.NewFlagSet("service", flag.ContinueOnError)
+		runCleanup := flags.Bool("cleanup", false, "run the uninstall cleanup and stop")
+		keepData := flags.Bool("keep-data", false, "with --cleanup, only stop the user hosts")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *runCleanup {
+			return service.RunTask(func() error { return runUninstallCleanup(*keepData) })
+		}
 		return runService()
 	case "daemon":
 		flags := flag.NewFlagSet("daemon", flag.ContinueOnError)

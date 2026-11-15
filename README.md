@@ -80,6 +80,36 @@ and its Credential Manager entry. The drive commands appear only on
 MapFTPDrive drives; see `docs/architecture.md` for how Explorer recognises
 them.
 
+## Uninstall
+
+Uninstalling stops every signed-in user's MapFTPDrive host (their drives
+unmount) and the system service. Unless you keep the data, it also removes:
+
+- the `MapFTPDrive/...` entries in Credential Manager of every user signed
+  in at that moment, and of the system service;
+- each user's `%LOCALAPPDATA%\MapFTPDrive` (drive definitions, SFTP host
+  keys, logs and caches), for every profile on the computer;
+- `%ProgramData%\MapFTPDrive` (system drive definitions, host keys, the drive
+  index and logs).
+
+How to keep the data for a later reinstall:
+
+- `setup.exe` installs: answer **No** when the uninstaller asks, or run the
+  uninstaller with `/KEEPDATA` (`unins000.exe /SILENT /KEEPDATA`). A silent
+  uninstall without `/KEEPDATA` removes the data.
+- MSI and setup-bundle installs: `msiexec /x <package or product code>
+  KEEPDATA=1`. Upgrades always keep the data.
+
+Windows encrypts each user's Credential Manager with that user's sign-in, so
+the passwords of users who are not signed in during the uninstall cannot be
+removed. Those users can delete the `MapFTPDrive/endpoint/...` entries under
+**Credential Manager > Windows Credentials > Generic Credentials**, or find
+them with `cmdkey /list` and remove each with
+`cmdkey /delete:MapFTPDrive/endpoint/<id>`.
+
+WinFsp stays installed; remove it separately from **Settings > Apps** if no
+other program needs it.
+
 ## Build
 
 Go 1.25 or newer is required. Release builds use the checked-in vendor tree:

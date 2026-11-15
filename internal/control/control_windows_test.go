@@ -65,6 +65,36 @@ func TestUserPipeReportsProgressForSlowRequests(t *testing.T) {
 	}
 }
 
+func TestShutdownMakesServeReturn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := make(chan error, 1)
+	go func() {
+		served <- Serve(ctx, config.User, func(context.Context, Request) error {
+			t.Error("the handler received the shutdown request")
+			return nil
+		})
+	}()
+	select {
+	case err := <-served:
+		t.Skipf("cannot serve the user pipe: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	sendCtx, sendCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer sendCancel()
+	if err := Send(sendCtx, config.User, Request{Operation: Shutdown}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("Serve returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve kept running after a shutdown request")
+	}
+}
+
 func TestSystemPipeServedByAnotherAccountIsRefused(t *testing.T) {
 	user, err := currentSID()
 	if err != nil {

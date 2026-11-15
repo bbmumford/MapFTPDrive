@@ -14,7 +14,9 @@ var errWindowsOnly = errors.New("this application runs on Windows")
 
 func launchUI(config.Scope) error                 { return errWindowsOnly }
 func installMachine() error                       { return errWindowsOnly }
-func uninstallMachine() error                     { return errWindowsOnly }
+func uninstallMachine(bool) error                 { return errWindowsOnly }
+func uninstallCleanup(bool) error                 { return errWindowsOnly }
+func runUninstallCleanup(bool) error              { return errWindowsOnly }
 func runService() error                           { return errWindowsOnly }
 func runDaemon(config.Scope) error                { return errWindowsOnly }
 func runDriveAction(string, string, string) error { return errWindowsOnly }

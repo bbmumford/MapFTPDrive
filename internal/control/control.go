@@ -17,6 +17,10 @@ const (
 	Remove       Operation = "remove"
 	Rename       Operation = "rename"
 	Ping         Operation = "ping"
+	// Shutdown makes Serve return, so the host stops its drives and exits.
+	// Serve answers it itself; the handler never sees it. The uninstaller
+	// sends it to every user host before removing the program.
+	Shutdown Operation = "shutdown"
 )
 
 // RequestTimeout bounds one request end to end. The host cancels the
@@ -71,10 +75,20 @@ func PipeName(scope config.Scope) (string, error) {
 	return pipeName(scope)
 }
 
-// Serve accepts requests on the scope's pipe until ctx ends. Each handler
-// call receives a context that ends after RequestTimeout.
+// Serve accepts requests on the scope's pipe until ctx ends or a Shutdown
+// request arrives, then returns nil. Each handler call receives a context
+// that ends after RequestTimeout.
 func Serve(ctx context.Context, scope config.Scope, handler Handler) error {
 	return serve(ctx, scope, handler)
+}
+
+// StopUserHosts sends Shutdown to every user host on this computer and
+// waits up to timeout for each to exit. It returns the process IDs of hosts
+// that are still running, which the caller may terminate. Only SYSTEM (and
+// each host's own user) can open user pipes, so the uninstaller runs it as
+// LocalSystem. No credential is sent, so the pipe server is not verified.
+func StopUserHosts(ctx context.Context, timeout time.Duration) ([]uint32, error) {
+	return stopUserHosts(ctx, timeout)
 }
 
 // Send verifies the host serving the scope's pipe, then delivers request

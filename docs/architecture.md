@@ -178,6 +178,19 @@ installed from inside the MapFTPDrive MSI:
 
 MapFTPDrive uninstall never removes the shared WinFsp runtime.
 
+Removal runs `internal/cleanup` as LocalSystem, the only account that can
+open every user's host pipe and its own credential vault: the MSI as a
+deferred custom action (`uninstall-cleanup`) after the service stops and
+before files are removed; the EXE's `uninstall` step through the service,
+whose command line it points at `service --cleanup` for one run. Cleanup
+sends `shutdown` to every `MapFTPDrive-user-*` pipe, waits for those hosts
+to exit and terminates any that remain (only processes still running
+`MapFTPDrive.exe`). Unless the data is kept, it then runs `purge-user` as
+the user of every signed-in session (only that user's logon can open their
+Credential Manager), deletes `AppData\Local\MapFTPDrive` from every profile
+without following links, deletes LocalSystem's `MapFTPDrive/*` credentials
+and removes `%ProgramData%\MapFTPDrive`. Upgrades only stop the hosts.
+
 Release packaging builds x64 and ARM64 setup EXEs, setup bundles and MSIs.
 Authenticode signing is enabled only when both signing secrets are present;
 the bundle's Burn engine is detached, signed and reattached before the

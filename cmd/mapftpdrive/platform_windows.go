@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sys/windows"
 	"mapftpdrive/internal/app"
+	"mapftpdrive/internal/cleanup"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/control"
 	"mapftpdrive/internal/explorer"
@@ -96,15 +97,58 @@ func prepareSystemData() error {
 	return service.RegisterEventSource()
 }
 
-// uninstallMachine is the EXE uninstaller's pre-delete step: it removes the
-// service, its event log source and any per-user registration of the
-// uninstalling account. The uninstaller deletes the machine-wide verbs.
-func uninstallMachine() error {
+// uninstallMachine is the EXE uninstaller's pre-delete step, run elevated:
+// it stops the user hosts and, unless keepData is set, removes stored
+// passwords and data (uninstallCleanup), then removes the service, its
+// event log source and any per-user registration of the uninstalling
+// account. The uninstaller deletes the machine-wide verbs and files.
+func uninstallMachine(keepData bool) error {
 	return errors.Join(
+		uninstallCleanup(keepData),
 		explorer.RemoveUserRegistration(),
 		service.Uninstall(),
 		service.RemoveEventSource(),
 	)
+}
+
+// uninstallCleanup runs cleanup.Run as LocalSystem: directly when this
+// process is LocalSystem (the MSI's custom action), otherwise through the
+// installed service (the EXE uninstaller runs as an administrator, who
+// cannot open other users' host pipes or LocalSystem's credential vault).
+// Without the service, an administrator can still remove the system data
+// directory; the result reports what was left.
+func uninstallCleanup(keepData bool) error {
+	if cleanup.IsLocalSystem() {
+		return runUninstallCleanup(keepData)
+	}
+	arguments := []string{"--cleanup"}
+	if keepData {
+		arguments = append(arguments, "--keep-data")
+	}
+	err := service.RunAsService(arguments...)
+	if !errors.Is(err, service.ErrServiceMissing) {
+		return err
+	}
+	if keepData {
+		return errors.New("the MapFTPDrive service is missing, so running user hosts were not stopped")
+	}
+	dir, dirErr := config.SystemDirectory()
+	if dirErr == nil {
+		dirErr = os.RemoveAll(dir)
+	}
+	return errors.Join(
+		errors.New("the MapFTPDrive service is missing, so user hosts, user data and LocalSystem's stored passwords were not removed"),
+		dirErr,
+	)
+}
+
+// runUninstallCleanup is uninstallCleanup's LocalSystem part.
+func runUninstallCleanup(keepData bool) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return cleanup.Run(cleanup.Options{KeepData: keepData, Executable: executable})
 }
 
 func runService() error {

@@ -163,9 +163,41 @@
         Execute="deferred"
         Impersonate="no"
         Return="check" />
+    <!--
+      Removal runs the program as LocalSystem, after the service has stopped
+      and before files are removed, to stop every user's host (so no drive
+      stays mounted and MapFTPDrive.exe is not in use) and, on a full
+      uninstall, to delete stored passwords, drive definitions, host keys and
+      logs (see cleanup.Run). KEEPDATA=1 on the msiexec command line keeps
+      the data; an upgrade always keeps it. A cleanup failure must not block
+      removal, so the result is ignored and the program reports it in the
+      MSI log.
+    -->
+    <CustomAction
+        Id="UninstallCleanup"
+        FileRef="MapFTPDriveExe"
+        ExeCommand="uninstall-cleanup"
+        Execute="deferred"
+        Impersonate="no"
+        Return="ignore" />
+    <CustomAction
+        Id="StopUserHosts"
+        FileRef="MapFTPDriveExe"
+        ExeCommand="uninstall-cleanup --keep-data"
+        Execute="deferred"
+        Impersonate="no"
+        Return="ignore" />
+    <!--
+      User hosts have no windows, so Restart Manager could only end them by
+      forcing a restart; StopUserHosts and UninstallCleanup end them cleanly
+      before RemoveFiles instead.
+    -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
     <InstallExecuteSequence>
       <Custom Action="ConfigureService" After="InstallServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="PrepareSystemData" Before="StartServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="UninstallCleanup" After="StopServices" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT KEEPDATA" />
+      <Custom Action="StopUserHosts" After="UninstallCleanup" Condition="REMOVE~=&quot;ALL&quot; AND (UPGRADINGPRODUCTCODE OR KEEPDATA)" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

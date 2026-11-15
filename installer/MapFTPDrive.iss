@@ -101,9 +101,6 @@ Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove\command"; Va
 [Run]
 Filename: "{app}\MapFTPDrive.exe"; Description: "Launch MapFTPDrive"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "{app}\MapFTPDrive.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveExplorerIntegration"
-
 [Code]
 const
   BundledWinFspVersion = '{#WinFspVersion}';
@@ -207,11 +204,31 @@ begin
     Log('net stop MapFTPDrive exit code: ' + IntToStr(ResultCode));
 end;
 
+{ StopUserHosts asks an installed copy to stop every user's host cleanly,
+  keeping all data, so their drives unmount and the executable can be
+  replaced; the hosts start again at the next sign-in or Explorer command.
+  A copy without this command exits with an error, and Restart Manager
+  (CloseApplications) then closes its hosts instead. }
+procedure StopUserHosts;
+var
+  Installed: String;
+  ResultCode: Integer;
+begin
+  Installed := ExpandConstant('{app}\MapFTPDrive.exe');
+  if not FileExists(Installed) then
+    Exit;
+  if Exec(Installed, 'uninstall-cleanup --keep-data', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('Stopping user hosts exit code: ' + IntToStr(ResultCode));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := InstallWinFsp;
   if Result = '' then
+  begin
+    StopUserHosts;
     StopService;
+  end;
 end;
 
 function NeedRestart: Boolean;
@@ -249,4 +266,46 @@ begin
     WizardForm.StatusLabel.Caption := 'Securing MapFTPDrive data and installing its service...';
     RunInstallStep;
   end;
+end;
+
+{ UninstallKeepsData decides whether uninstalling keeps drive definitions,
+  stored passwords and logs: /KEEPDATA on the uninstaller command line keeps
+  them, a silent uninstall otherwise removes them, and an interactive one
+  asks. }
+function UninstallKeepsData: Boolean;
+var
+  Index: Integer;
+begin
+  for Index := 1 to ParamCount do
+    if CompareText(ParamStr(Index), '/KEEPDATA') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  if UninstallSilent then
+    Result := False
+  else
+    Result := MsgBox('Also remove your saved MapFTPDrive drives and their stored passwords?'
+      + #13#10#13#10 + 'This removes them for every user signed in now and for the system-wide drives. '
+      + 'Choose No to keep them for a later reinstall.', mbConfirmation, MB_YESNO) = IDNO;
+end;
+
+{ Before files are removed, "MapFTPDrive.exe uninstall" stops every user's
+  host, removes the requested data through the service as LocalSystem, and
+  deletes the service and its event log source. The uninstaller removes the
+  machine-wide Explorer verbs itself. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Parameters: String;
+  ResultCode: Integer;
+begin
+  if CurUninstallStep <> usUninstall then
+    Exit;
+  Parameters := 'uninstall';
+  if UninstallKeepsData then
+    Parameters := Parameters + ' --keep-data';
+  if not Exec(ExpandConstant('{app}\MapFTPDrive.exe'), Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('MapFTPDrive uninstall step could not start: ' + SysErrorMessage(ResultCode))
+  else if ResultCode <> 0 then
+    Log('MapFTPDrive uninstall step exit code: ' + IntToStr(ResultCode));
 end;

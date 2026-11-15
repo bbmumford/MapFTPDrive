@@ -93,23 +93,25 @@ func serve(ctx context.Context, scope config.Scope, handler Handler) error {
 		return err
 	}
 	defer listener.Close()
+	serveCtx, shutdown := context.WithCancel(ctx)
+	defer shutdown()
 	go func() {
-		<-ctx.Done()
+		<-serveCtx.Done()
 		listener.Close()
 	}()
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+			if serveCtx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
 			return err
 		}
-		go handleConnection(ctx, connection, handler)
+		go handleConnection(ctx, connection, handler, shutdown)
 	}
 }
 
-func handleConnection(ctx context.Context, connection net.Conn, handler Handler) {
+func handleConnection(ctx context.Context, connection net.Conn, handler Handler, shutdown context.CancelFunc) {
 	defer connection.Close()
 	encoder := json.NewEncoder(connection)
 	write := func(response Response) error {
@@ -120,6 +122,11 @@ func handleConnection(ctx context.Context, connection net.Conn, handler Handler)
 	var request Request
 	if err := json.NewDecoder(io.LimitReader(connection, 128*1024)).Decode(&request); err != nil {
 		_ = write(Response{Error: "invalid request"})
+		return
+	}
+	if request.Operation == Shutdown {
+		_ = write(Response{Status: StatusDone})
+		shutdown()
 		return
 	}
 	if err := write(Response{Status: StatusAccepted}); err != nil {
