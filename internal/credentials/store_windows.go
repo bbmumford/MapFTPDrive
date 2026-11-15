@@ -4,6 +4,7 @@ package credentials
 
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -12,7 +13,11 @@ import (
 const (
 	credTypeGeneric         = 1
 	credPersistLocalMachine = 2
-	credPrefix              = "MapFTPDrive/"
+	// credPrefix namespaces MapFTPDrive's Credential Manager target names.
+	credPrefix = "MapFTPDrive/" //nolint:gosec // a target-name prefix, not a secret value
+	// credMaxBlobSize is CRED_MAX_CREDENTIAL_BLOB_SIZE: CredWriteW rejects
+	// larger secrets, so Put reports the limit instead.
+	credMaxBlobSize = 5 * 512
 )
 
 type credential struct {
@@ -56,10 +61,13 @@ func (windowsStore) Put(key, username, password string) error {
 		return err
 	}
 	blob := []byte(password)
+	if len(blob) > credMaxBlobSize {
+		return fmt.Errorf("the password or passphrase is longer than the %d bytes Credential Manager can store", credMaxBlobSize)
+	}
 	item := credential{
 		Type:               credTypeGeneric,
 		TargetName:         targetName,
-		CredentialBlobSize: uint32(len(blob)),
+		CredentialBlobSize: uint32(len(blob)), //nolint:gosec // bounded by credMaxBlobSize above
 		Persist:            credPersistLocalMachine,
 		UserName:           userName,
 	}
@@ -91,7 +99,8 @@ func (windowsStore) Get(key string) (string, string, error) {
 		}
 		return "", "", callErr
 	}
-	defer credFree.Call(uintptr(unsafe.Pointer(item)))
+	// CredFree returns nothing; its result registers carry no status.
+	defer func() { _, _, _ = credFree.Call(uintptr(unsafe.Pointer(item))) }()
 	username := windows.UTF16PtrToString(item.UserName)
 	var password string
 	if item.CredentialBlobSize != 0 {

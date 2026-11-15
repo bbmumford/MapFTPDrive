@@ -16,11 +16,12 @@ func VolumeLabel(drive string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	buffer := make([]uint16, windows.MAX_PATH+1)
+	const bufferLength = windows.MAX_PATH + 1
+	buffer := make([]uint16, bufferLength)
 	err = windows.GetVolumeInformation(
 		root,
 		&buffer[0],
-		uint32(len(buffer)),
+		bufferLength,
 		nil,
 		nil,
 		nil,
