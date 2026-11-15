@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MapFTPDrive setup bundle: one Burn executable that installs the pinned
+  WinFsp runtime when needed and then the MapFTPDrive MSI, each as its own
+  Windows Installer transaction run in sequence by the Burn engine.
+  scripts/build-msi.ps1 builds it with:
+    Version         numeric bundle version (MAJOR.MINOR.PATCH)
+    WinFspMsi       the hash-verified upstream WinFsp MSI
+    WinFspVersion   that MSI's ProductVersion, for example 2.1.25156
+    MapFTPDriveMsi  the MapFTPDrive MSI built from MapFTPDrive.wxs
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle
+      Name="MapFTPDrive"
+      Manufacturer="MapFTPDrive contributors"
+      Version="$(var.Version)"
+      UpgradeCode="927C99F6-8E68-458B-86A5-91C8CFCFBEB5"
+      AboutUrl="https://github.com/bbmumford/MapFTPDrive"
+      HelpUrl="https://github.com/bbmumford/MapFTPDrive/issues">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          LicenseUrl="https://github.com/bbmumford/MapFTPDrive/blob/main/LICENSE"
+          ShowVersion="yes" />
+    </BootstrapperApplication>
+
+    <!--
+      Installed WinFsp version in the upgrade family of the bundled MSI.
+      WinFsp is a shared runtime other programs may have installed; a newer
+      one is kept (its MSI would refuse the downgrade) and an equal one is
+      already present.
+    -->
+    <util:ProductSearch
+        Id="FindWinFsp"
+        UpgradeCode="5466A3D8-3AA1-4240-B6A0-3A051940A3EC"
+        Result="version"
+        Variable="WinFspInstalledVersion" />
+    <!--
+      Earlier WinFsp releases use another upgrade code, and the bundled MSI
+      refuses to install over them. Stop before changing anything and tell
+      the user what to remove.
+    -->
+    <util:ProductSearch
+        Id="FindOlderWinFsp"
+        UpgradeCode="82F812D9-4083-4EF1-8BC8-0F1EDA05B46B"
+        Result="version"
+        Variable="WinFspOlderVersion" />
+    <bal:Condition
+        Message="An older WinFsp release that cannot be upgraded automatically is installed. Uninstall WinFsp from Settings, Apps, then run this setup again."
+        Condition="NOT WinFspOlderVersion" />
+
+    <Chain>
+      <!--
+        Permanent: uninstalling MapFTPDrive never removes the shared WinFsp
+        runtime. Burn verifies the embedded payload's hash before it runs,
+        records a 3010 result and asks for a restart once the chain has
+        finished.
+      -->
+      <MsiPackage
+          Id="WinFsp"
+          SourceFile="$(var.WinFspMsi)"
+          Permanent="yes"
+          Vital="yes"
+          Visible="yes"
+          InstallCondition="NOT WinFspInstalledVersion OR WinFspInstalledVersion &lt; v$(var.WinFspVersion)" />
+      <MsiPackage
+          Id="MapFTPDrive"
+          SourceFile="$(var.MapFTPDriveMsi)"
+          Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

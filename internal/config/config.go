@@ -165,14 +165,18 @@ func (s *Store) save(endpoints []Endpoint) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	if err := ensureStoreDirectory(filepath.Dir(s.path)); err != nil {
 		return err
 	}
 	temp := s.path + ".new"
 	if err := os.WriteFile(temp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(temp, s.path)
+	if err := os.Rename(temp, s.path); err != nil {
+		return err
+	}
+	s.updateDriveIndex(endpoints)
+	return nil
 }
 
 func (s *Store) Upsert(endpoint Endpoint) error {

@@ -9,14 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 	"mapftpdrive/internal/app"
+	"mapftpdrive/internal/cleanup"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/control"
 	"mapftpdrive/internal/explorer"
@@ -26,43 +25,9 @@ import (
 	"mapftpdrive/internal/ui"
 )
 
-func installDependencies(winfspMSI string) error {
-	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `Software\WinFsp`, registry.QUERY_VALUE|registry.WOW64_32KEY)
-	if err == nil {
-		_ = key.Close()
-		return nil
-	}
-	if !errors.Is(err, registry.ErrNotExist) {
-		return fmt.Errorf("check WinFsp installation: %w", err)
-	}
-
-	// This command is launched asynchronously by the parent MSI. Windows
-	// Installer may still own its global transaction mutex for a few seconds,
-	// so retry ERROR_INSTALL_ALREADY_RUNNING rather than racing the parent.
-	const alreadyRunning = 1618
-	var lastErr error
-	for attempt := 0; attempt < 60; attempt++ {
-		command := exec.Command(
-			filepath.Join(os.Getenv("SystemRoot"), "System32", "msiexec.exe"),
-			"/i", winfspMSI, "/qn", "/norestart",
-		)
-		if err := command.Run(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-			var exitErr *exec.ExitError
-			if !errors.As(err, &exitErr) || exitErr.ExitCode() != alreadyRunning {
-				return fmt.Errorf("install bundled WinFsp runtime: %w", err)
-			}
-		}
-		time.Sleep(time.Second)
-	}
-	return fmt.Errorf("install bundled WinFsp runtime after waiting for Windows Installer: %w", lastErr)
-}
-
 func launchUI(scope config.Scope) error {
 	if scope == config.System && !windows.GetCurrentProcessToken().IsElevated() {
-		return relaunchElevated("map --scope system")
+		return relaunchElevated("map", "--scope", "system")
 	}
 	result, err := ui.ShowMapper(scope)
 	if errors.Is(err, ui.ErrCancelled) {
@@ -80,8 +45,7 @@ func launchUI(scope config.Scope) error {
 	if result.Endpoint.Protocol == config.SFTP {
 		key, scanErr := security.ScanSFTPHostKey(result.Endpoint)
 		if scanErr != nil {
-			ui.ShowError("Unable to verify SFTP server", scanErr)
-			return scanErr
+			return fmt.Errorf("unable to verify the SFTP server: %w", scanErr)
 		}
 		if !ui.ConfirmHostKey(result.Endpoint.Host, key.Algorithm, key.Fingerprint) {
 			return nil
@@ -91,7 +55,7 @@ func launchUI(scope config.Scope) error {
 	if err := ensureHost(scope); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), control.RequestTimeout)
 	defer cancel()
 	err = control.Send(ctx, scope, control.Request{
 		Operation: control.SaveAndMount,
@@ -99,14 +63,22 @@ func launchUI(scope config.Scope) error {
 		Password:  result.Password,
 	})
 	if err != nil {
-		ui.ShowError("Unable to map drive", err)
+		return fmt.Errorf("unable to map the drive: %w", err)
 	}
-	return err
+	return nil
 }
 
-func installExplorerIntegration() error {
-	if err := explorer.Install(); err != nil {
+// installMachine is the EXE installer's post-copy step, run elevated. The
+// installer itself writes the machine-wide Explorer verbs and Run entry;
+// this secures the system data directory, removes the per-user
+// registration of the installing account (see RemoveUserRegistration), and
+// installs or updates the service.
+func installMachine() error {
+	if err := prepareSystemData(); err != nil {
 		return err
+	}
+	if err := explorer.RemoveUserRegistration(); err != nil {
+		return fmt.Errorf("remove per-user Explorer registration: %w", err)
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -115,10 +87,68 @@ func installExplorerIntegration() error {
 	return service.Install(executable)
 }
 
-func uninstallExplorerIntegration() error {
-	explorerErr := explorer.Uninstall()
-	serviceErr := service.Uninstall()
-	return errors.Join(explorerErr, serviceErr)
+// prepareSystemData creates or repairs the protected system data directory
+// and registers the service's event log source. Both installers run it
+// elevated before the service starts, which otherwise refuses to run.
+func prepareSystemData() error {
+	if err := config.SecureSystemDirectory(); err != nil {
+		return fmt.Errorf("secure the system data directory: %w", err)
+	}
+	return service.RegisterEventSource()
+}
+
+// uninstallMachine is the EXE uninstaller's pre-delete step, run elevated:
+// it stops the user hosts and, unless keepData is set, removes stored
+// passwords and data (uninstallCleanup), then removes the service, its
+// event log source and any per-user registration of the uninstalling
+// account. The uninstaller deletes the machine-wide verbs and files.
+func uninstallMachine(keepData bool) error {
+	return errors.Join(
+		uninstallCleanup(keepData),
+		explorer.RemoveUserRegistration(),
+		service.Uninstall(),
+		service.RemoveEventSource(),
+	)
+}
+
+// uninstallCleanup runs cleanup.Run as LocalSystem: directly when this
+// process is LocalSystem (the MSI's custom action), otherwise through the
+// installed service (the EXE uninstaller runs as an administrator, who
+// cannot open other users' host pipes or LocalSystem's credential vault).
+// Without the service, an administrator can still remove the system data
+// directory; the result reports what was left.
+func uninstallCleanup(keepData bool) error {
+	if cleanup.IsLocalSystem() {
+		return runUninstallCleanup(keepData)
+	}
+	arguments := []string{"--cleanup"}
+	if keepData {
+		arguments = append(arguments, "--keep-data")
+	}
+	err := service.RunAsService(arguments...)
+	if !errors.Is(err, service.ErrServiceMissing) {
+		return err
+	}
+	if keepData {
+		return errors.New("the MapFTPDrive service is missing, so running user hosts were not stopped")
+	}
+	dir, dirErr := config.SystemDirectory()
+	if dirErr == nil {
+		dirErr = os.RemoveAll(dir)
+	}
+	return errors.Join(
+		errors.New("the MapFTPDrive service is missing, so user hosts, user data and LocalSystem's stored passwords were not removed"),
+		dirErr,
+	)
+}
+
+// runUninstallCleanup is uninstallCleanup's LocalSystem part.
+func runUninstallCleanup(keepData bool) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return cleanup.Run(cleanup.Options{KeepData: keepData, Executable: executable})
 }
 
 func runService() error {
@@ -134,17 +164,20 @@ func runDaemon(scope config.Scope) error {
 	return host.Run(ctx, scope)
 }
 
+// runDriveAction performs action on the managed drive with the given
+// upper-case letter. System drives are handled by an elevated copy of this
+// process, which receives the same arguments.
 func runDriveAction(action, drive, name string) error {
 	scope, endpoint, err := findManagedDrive(drive)
 	if err != nil {
 		return err
 	}
 	if scope == config.System && !windows.GetCurrentProcessToken().IsElevated() {
-		arguments := fmt.Sprintf(`%s --drive "%s"`, action, drive)
+		arguments := []string{action, "--drive", drive}
 		if name != "" {
-			arguments += fmt.Sprintf(` --name "%s"`, strings.ReplaceAll(name, `"`, ``))
+			arguments = append(arguments, "--name", name)
 		}
-		return relaunchElevated(arguments)
+		return relaunchElevated(arguments...)
 	}
 	if action == "remove" && !ui.ConfirmRemove(endpoint.Name, endpoint.DriveLetter) {
 		return nil
@@ -162,27 +195,88 @@ func runDriveAction(action, drive, name string) error {
 		return err
 	}
 	operation := control.Operation(action)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), control.RequestTimeout)
 	defer cancel()
-	err = control.Send(ctx, scope, control.Request{Operation: operation, Drive: drive, Name: name})
-	if err != nil {
-		ui.ShowError("MapFTPDrive", err)
-	}
-	return err
+	return control.Send(ctx, scope, control.Request{Operation: operation, Drive: drive, Name: name})
 }
 
-func findManagedDrive(drive string) (config.Scope, config.Endpoint, error) {
-	for _, scope := range []config.Scope{config.User, config.System} {
-		path, err := config.DefaultPath(scope)
-		if err != nil {
-			continue
-		}
-		endpoint, err := config.NewStore(path).FindByDrive(drive)
-		if err == nil {
-			return scope, endpoint, nil
+// mountUnmountedDrive lets the user choose one of the managed drives that
+// Unmount disabled and mounts it again. It backs the This PC "Mount FTP
+// Drive" verb: an unmounted drive has no drive-letter item to right-click.
+func mountUnmountedDrive() error {
+	var choices []config.Endpoint
+	for _, endpoint := range managedDrives() {
+		if endpoint.Disabled {
+			choices = append(choices, endpoint)
 		}
 	}
-	return "", config.Endpoint{}, fmt.Errorf("drive %q is not managed by MapFTPDrive", drive)
+	if len(choices) == 0 {
+		ui.ShowInfo("Mount FTP Drive", "Every MapFTPDrive drive is already mounted.\n\nUse Map FTP Drive to add a new one.")
+		return nil
+	}
+	labels := make([]string, len(choices))
+	for index, endpoint := range choices {
+		labels[index] = fmt.Sprintf("%s:  %s", endpoint.DriveLetter, endpoint.Name)
+		if endpoint.Scope == config.System {
+			labels[index] += "  (system-wide)"
+		}
+	}
+	index, err := ui.PickOne("Mount FTP Drive", "Choose the drive to mount:", "Mount", labels)
+	if errors.Is(err, ui.ErrCancelled) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return runDriveAction("mount", choices[index].DriveLetter, "")
+}
+
+// managedDrives returns the endpoints of both scopes. A scope that cannot
+// be read is skipped so the other stays usable.
+func managedDrives() []config.Endpoint {
+	var endpoints []config.Endpoint
+	if path, err := config.DefaultPath(config.User); err == nil {
+		if loaded, err := config.NewStore(path).Load(); err == nil {
+			endpoints = append(endpoints, loaded...)
+		}
+	}
+	return append(endpoints, systemDrives()...)
+}
+
+// systemDrives lists the system-scope drives. Only SYSTEM and
+// Administrators may read the system store, so an elevated process reads
+// it directly and any other process reads the drive index the service
+// keeps beside it, which holds the letter, ID, name and state.
+func systemDrives() []config.Endpoint {
+	if windows.GetCurrentProcessToken().IsElevated() {
+		if path, err := config.DefaultPath(config.System); err == nil {
+			if loaded, err := config.NewStore(path).Load(); err == nil {
+				return loaded
+			}
+		}
+	}
+	indexed, err := config.ReadDriveIndex()
+	if err != nil {
+		return nil
+	}
+	endpoints := make([]config.Endpoint, 0, len(indexed))
+	for _, drive := range indexed {
+		if drive.Scope == config.System {
+			endpoints = append(endpoints, drive.Endpoint())
+		}
+	}
+	return endpoints
+}
+
+// findManagedDrive resolves an upper-case drive letter to its managed
+// endpoint, preferring the user scope when both scopes claim the letter.
+func findManagedDrive(drive string) (config.Scope, config.Endpoint, error) {
+	for _, endpoint := range managedDrives() {
+		if endpoint.DriveLetter == drive {
+			return endpoint.Scope, endpoint, nil
+		}
+	}
+	return "", config.Endpoint{}, fmt.Errorf("drive %s: is not managed by MapFTPDrive", drive)
 }
 
 func ensureHost(scope config.Scope) error {
@@ -191,6 +285,10 @@ func ensureHost(scope config.Scope) error {
 	cancel()
 	if err == nil {
 		return nil
+	}
+	// Another process holds the pipe name; a new host could not take it.
+	if errors.Is(err, control.ErrUntrustedHost) {
+		return err
 	}
 	if scope == config.System {
 		if err := service.EnsureStarted(); err != nil {
@@ -201,7 +299,9 @@ func ensureHost(scope config.Scope) error {
 		if err != nil {
 			return err
 		}
-		command := exec.Command(executable, "daemon", "--scope", "user")
+		// executable is this program's own path from os.Executable and the
+		// arguments are constants, so nothing caller-supplied reaches it.
+		command := exec.Command(executable, "daemon", "--scope", "user") //nolint:gosec // G204: own executable, constant arguments.
 		command.SysProcAttr = &syscall.SysProcAttr{
 			HideWindow:    true,
 			CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
@@ -216,21 +316,58 @@ func ensureHost(scope config.Scope) error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		err := control.Send(ctx, scope, control.Request{Operation: control.Ping})
 		cancel()
-		if err == nil {
-			return nil
+		if err == nil || errors.Is(err, control.ErrUntrustedHost) {
+			return err
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	return errors.New("mount host did not become ready")
 }
 
-func relaunchElevated(arguments string) error {
+// relaunchElevated starts this executable with arguments through the UAC
+// consent prompt. Each argument is escaped with the rules the child's argv
+// parser reverses, so names with quotes, spaces or trailing backslashes
+// arrive unchanged. Declining the prompt is not an error.
+func relaunchElevated(arguments ...string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	verb, _ := windows.UTF16PtrFromString("runas")
-	file, _ := windows.UTF16PtrFromString(executable)
-	args, _ := windows.UTF16PtrFromString(arguments)
-	return windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL)
+	verb, err := windows.UTF16PtrFromString("runas")
+	if err != nil {
+		return err
+	}
+	file, err := windows.UTF16PtrFromString(executable)
+	if err != nil {
+		return err
+	}
+	args, err := windows.UTF16PtrFromString(elevatedCommandLine(arguments))
+	if err != nil {
+		return err
+	}
+	err = windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL)
+	if errors.Is(err, windows.ERROR_CANCELLED) {
+		return nil
+	}
+	return err
+}
+
+// elevatedCommandLine joins arguments into the parameter string that
+// ShellExecute passes to the elevated process.
+func elevatedCommandLine(arguments []string) string {
+	escaped := make([]string, len(arguments))
+	for index, argument := range arguments {
+		escaped[index] = syscall.EscapeArg(argument)
+	}
+	return strings.Join(escaped, " ")
+}
+
+// reportError writes err to stderr and, for commands started from Explorer
+// or the Start menu, also shows it in a message box because a GUI-subsystem
+// process has no console there.
+func reportError(err error, interactive bool) {
+	fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
+	if interactive {
+		ui.ShowError("MapFTPDrive", err)
+	}
 }

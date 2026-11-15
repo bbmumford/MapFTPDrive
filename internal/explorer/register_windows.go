@@ -3,98 +3,36 @@
 package explorer
 
 import (
-	"fmt"
-	"os"
+	"errors"
 
 	"golang.org/x/sys/windows/registry"
 )
 
 const (
-	thisPCShell = `Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell`
-	driveShell  = `Software\Classes\Drive\shell`
+	classesRoot = `Software\Classes\`
+	runKey      = `Software\Microsoft\Windows\CurrentVersion\Run`
 )
 
-type verb struct {
-	key      string
-	label    string
-	args     string
-	extended bool
-	shield   bool
-}
-
-var verbs = []verb{
-	{thisPCShell + `\MapFTPDrive`, "Map FTP Drive", `map --scope user`, false, false},
-	{thisPCShell + `\MapFTPDriveSystem`, "Map FTP Drive (system-wide)", `map --scope system`, true, true},
-	{driveShell + `\MapFTPDriveUnmount`, "Unmount FTP Drive", `unmount --drive "%V"`, false, false},
-	{driveShell + `\MapFTPDriveRename`, "Rename FTP Drive", `rename --drive "%V"`, false, false},
-	{driveShell + `\MapFTPDriveRemove`, "Remove FTP Drive", `remove --drive "%V"`, true, false},
-}
-
-func Install() error {
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	for _, item := range verbs {
-		key, _, err := registry.CreateKey(registry.CURRENT_USER, item.key, registry.SET_VALUE)
-		if err != nil {
-			return fmt.Errorf("create Explorer verb %s: %w", item.key, err)
-		}
-		if err := key.SetStringValue("", item.label); err != nil {
-			key.Close()
-			return err
-		}
-		if err := key.SetStringValue("Icon", executable); err != nil {
-			key.Close()
-			return err
-		}
-		if item.extended {
-			if err := key.SetStringValue("Extended", ""); err != nil {
-				key.Close()
-				return err
-			}
-		}
-		if item.shield {
-			if err := key.SetStringValue("HasLUAShield", ""); err != nil {
-				key.Close()
-				return err
-			}
-		}
-		command, _, err := registry.CreateKey(key, "command", registry.SET_VALUE)
-		if err != nil {
-			key.Close()
-			return err
-		}
-		err = command.SetStringValue("", fmt.Sprintf(`"%s" %s`, executable, item.args))
-		command.Close()
-		key.Close()
-		if err != nil {
-			return err
-		}
-	}
-	run, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
-	if err != nil {
-		return err
-	}
-	defer run.Close()
-	return run.SetStringValue("MapFTPDrive", fmt.Sprintf(`"%s" daemon --scope user`, executable))
-}
-
-func Uninstall() error {
+// RemoveUserRegistration deletes any copy of the Explorer verbs and the
+// startup entry from the current user's hive. Both belong in HKLM, where
+// the installers write them: a per-user copy shadows the machine-wide verbs
+// for that user (HKCU wins in the merged HKCR view) with whatever command
+// strings it holds, and starts a second host at sign-in. The EXE installer
+// runs it during install and uninstall for the installing account.
+func RemoveUserRegistration() error {
 	var first error
-	for i := len(verbs) - 1; i >= 0; i-- {
-		if err := registry.DeleteKey(registry.CURRENT_USER, verbs[i].key+`\command`); err != nil && err != registry.ErrNotExist && first == nil {
-			first = err
-		}
-		if err := registry.DeleteKey(registry.CURRENT_USER, verbs[i].key); err != nil && err != registry.ErrNotExist && first == nil {
+	keep := func(err error) {
+		if err != nil && !errors.Is(err, registry.ErrNotExist) && first == nil {
 			first = err
 		}
 	}
-	run, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
+	for i := len(Verbs) - 1; i >= 0; i-- {
+		keep(registry.DeleteKey(registry.CURRENT_USER, classesRoot+Verbs[i].Key+`\command`))
+		keep(registry.DeleteKey(registry.CURRENT_USER, classesRoot+Verbs[i].Key))
+	}
+	run, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
 	if err == nil {
-		if deleteErr := run.DeleteValue("MapFTPDrive"); deleteErr != nil && deleteErr != registry.ErrNotExist && first == nil {
-			first = deleteErr
-		}
+		keep(run.DeleteValue("MapFTPDrive"))
 		run.Close()
 	}
 	return first

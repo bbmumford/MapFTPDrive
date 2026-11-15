@@ -29,7 +29,15 @@ if (-not $BuildDate) {
     $BuildDate = [DateTimeOffset]::FromUnixTimeSeconds([long]$epoch).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
 
+# The setup compares this with the installed WinFsp version to skip an
+# equal or newer runtime; it is the ProductVersion in the upstream file name.
+if ($WinFspUrl -notmatch 'winfsp-(\d+\.\d+\.\d+)\.msi$') { throw "Cannot read the WinFsp version from $WinFspUrl" }
+$winfspVersion = $Matches[1]
+
 New-Item -ItemType Directory -Force -Path $build, $output | Out-Null
+
+# Embed the manifest, icon and this build's version in the executable.
+& (Join-Path $PSScriptRoot "generate-resources.ps1") -Version $Version
 
 $env:GOOS = "windows"
 $env:GOARCH = $Architecture
@@ -59,11 +67,14 @@ $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
 $innoArch = if ($Architecture -eq "arm64") { "arm64" } else { "x64" }
 $signingSuffix = if ($signed) { "" } else { "-unsigned" }
-& $iscc "/DVersion=$Version" "/DArch=$innoArch" "/DBinary=$binary" "/DWinFspMsi=$winfsp" "/DSigningSuffix=$signingSuffix" (Join-Path $repo "installer/MapFTPDrive.iss")
+& $iscc "/DVersion=$Version" "/DArch=$innoArch" "/DBinary=$binary" "/DWinFspMsi=$winfsp" "/DWinFspVersion=$winfspVersion" "/DSigningSuffix=$signingSuffix" (Join-Path $repo "installer/MapFTPDrive.iss")
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
 
-$installer = Get-ChildItem $output -Filter "MapFTPDrive-*-setup*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $installer) { throw "Installer output was not created" }
+# The exact name OutputBaseFilename produces; the MSI setup bundle shares
+# the output directory and also ends in -setup.
+$installerPath = Join-Path $output "MapFTPDrive-$Version-windows-$innoArch-setup$signingSuffix.exe"
+if (-not (Test-Path $installerPath)) { throw "Installer output was not created at $installerPath" }
+$installer = Get-Item $installerPath
 
 if ($signed) {
     Invoke-CodeSigning $installer.FullName

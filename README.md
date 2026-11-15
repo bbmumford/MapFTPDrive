@@ -54,13 +54,15 @@ GitHub release:
 
 - `windows-x64` for ordinary 64-bit Intel/AMD Windows computers.
 - `windows-arm64` for Windows on ARM.
-- `setup.exe` for an interactive installation.
-- `.msi` for Windows Installer and managed-deployment workflows.
+- `-setup.exe` for an interactive installation (recommended).
+- `-bundle-setup.exe` for managed deployment of the Windows Installer
+  packages with WinFsp included.
+- `.msi` for administrators who deploy WinFsp 2.1 or later themselves.
 
-Both formats install MapFTPDrive and the bundled WinFsp 2.1 runtime when it
-is not already present. Installation requires administrator approval because
-the WinFsp filesystem driver and the MapFTPDrive system service are
-machine-wide components.
+Both setup programs install the bundled WinFsp 2.1 runtime when no equal or
+newer WinFsp is present, and keep a newer one. Installation requires
+administrator approval because the WinFsp filesystem driver and the
+MapFTPDrive system service are machine-wide components.
 
 After installation:
 
@@ -74,8 +76,47 @@ Hold Shift while right-clicking **This PC** to reveal
 **Map FTP Drive (system-wide)**. Windows requests UAC approval before the
 system mapping dialog is displayed.
 
-Unmount retains a disabled definition. Map/mount enables it again. Remove
-deletes both the definition and its Credential Manager entry.
+A system-wide drive is visible to every user of the computer, and all of
+them can read, change and delete its remote files using the account the
+administrator entered (the password itself stays hidden in the service's
+Credential Manager). Map a per-user drive unless every local user may have
+that access; see `SECURITY.md`.
+
+Unmount retains a disabled definition. Right-click **This PC** and choose
+**Mount FTP Drive** to mount it again. Remove deletes both the definition
+and its Credential Manager entry. The drive commands appear only on
+MapFTPDrive drives; see `docs/architecture.md` for how Explorer recognises
+them.
+
+## Uninstall
+
+Uninstalling stops every signed-in user's MapFTPDrive host (their drives
+unmount) and the system service. Unless you keep the data, it also removes:
+
+- the `MapFTPDrive/...` entries in Credential Manager of every user signed
+  in at that moment, and of the system service;
+- each user's `%LOCALAPPDATA%\MapFTPDrive` (drive definitions, SFTP host
+  keys, logs and caches), for every profile on the computer;
+- `%ProgramData%\MapFTPDrive` (system drive definitions, host keys, the drive
+  index and logs).
+
+How to keep the data for a later reinstall:
+
+- `setup.exe` installs: answer **No** when the uninstaller asks, or run the
+  uninstaller with `/KEEPDATA` (`unins000.exe /SILENT /KEEPDATA`). A silent
+  uninstall without `/KEEPDATA` removes the data.
+- MSI and setup-bundle installs: `msiexec /x <package or product code>
+  KEEPDATA=1`. Upgrades always keep the data.
+
+Windows encrypts each user's Credential Manager with that user's sign-in, so
+the passwords of users who are not signed in during the uninstall cannot be
+removed. Those users can delete the `MapFTPDrive/endpoint/...` entries under
+**Credential Manager > Windows Credentials > Generic Credentials**, or find
+them with `cmdkey /list` and remove each with
+`cmdkey /delete:MapFTPDrive/endpoint/<id>`.
+
+WinFsp stays installed; remove it separately from **Settings > Apps** if no
+other program needs it.
 
 ## Build
 
@@ -90,25 +131,47 @@ GOOS=windows GOARCH=amd64 go build -mod=vendor ./cmd/mapftpdrive
 GOOS=windows GOARCH=arm64 go build -mod=vendor ./cmd/mapftpdrive
 ```
 
+The executable's application manifest (Common Controls 6, per-monitor v2
+DPI awareness, `asInvoker`, Windows 10/11), icon and version information
+come from `cmd/mapftpdrive/winres` and are linked from the committed
+`cmd/mapftpdrive/rsrc_windows_*.syso` files. After changing that directory,
+run `scripts/generate-resources.ps1` (PowerShell 7 on any OS; it runs the
+pinned `go-winres` through `go run`) and commit the regenerated files.
+`build-installer.ps1` regenerates them with the release version.
+
 ## Release artifacts
 
-Each release produces x64 and ARM64 artifacts in two formats:
+Each release produces x64 and ARM64 artifacts in three forms:
 
-- The `setup.exe` bootstrapper includes the pinned, checksum-verified WinFsp
-  runtime and is the recommended installation path.
-- The `.msi` also embeds the same WinFsp runtime for Windows Installer and
-  managed deployment environments. If WinFsp is absent, an elevated
-  post-install helper waits for the MapFTPDrive MSI transaction to finish
-  and then installs WinFsp silently. This avoids unsupported nested MSI
-  transactions.
+- `MapFTPDrive-<version>-windows-<arch>-setup.exe` (Inno Setup) carries the
+  pinned, checksum-verified WinFsp MSI and is the recommended installation
+  path. Before copying files it reads the installed WinFsp version
+  (`HKLM\SOFTWARE\WinFsp\Version`, 32-bit view); it skips WinFsp when the
+  same or a newer version is present, otherwise runs the WinFsp MSI and
+  handles its result: 3010 continues and asks for a restart at the end, 1638
+  keeps the installed version, 1618 (another installation running), 1602
+  (cancelled) and 1603 stop Setup with a message; the WinFsp log is
+  `%TEMP%\MapFTPDrive-WinFsp-install.log`.
+- `MapFTPDrive-<version>-windows-<arch>-bundle-setup.exe` is a WiX Burn
+  bundle that chains the same WinFsp MSI and the MapFTPDrive MSI as separate
+  transactions. It skips WinFsp when the same or a newer release of its
+  upgrade family is installed, stops with a message when an older WinFsp
+  that cannot be upgraded is present, and never removes WinFsp. Use it for
+  Intune, Configuration Manager or Group Policy deployment of MSI-based
+  packages: `bundle-setup.exe /quiet /norestart`. Exit code 0 is success,
+  3010 means a restart is required to finish, and other codes are the
+  failing package's Windows Installer error; `/log <file>` writes the
+  bundle and package logs.
+- `MapFTPDrive-<version>-windows-<arch>.msi` contains MapFTPDrive alone. It
+  refuses to install unless WinFsp is present, so deploy WinFsp 2.1 or
+  later (the upstream MSI from https://winfsp.dev) first, for example as an
+  Intune dependency.
 
 Unsigned development artifacts include `-unsigned` in their filename.
 Signed builds use the clean base filename and never add `-signed`.
 Every artifact has a sibling `.sha256` file, and each release includes a
 combined `SHA256SUMS` manifest and GitHub build-provenance attestations.
 
-The MSI dependency helper detects WinFsp through its machine installation
-registry entry and skips installation when it is already present.
 Uninstalling MapFTPDrive does not remove WinFsp because other filesystem
 applications may depend on it.
 

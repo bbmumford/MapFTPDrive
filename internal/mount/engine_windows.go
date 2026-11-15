@@ -74,6 +74,8 @@ func (windowsEngine) Mount(ctx context.Context, endpoint config.Endpoint, secret
 	// maps to SetVolumeLabel. SYSTEM mounts need network mode to cross logon
 	// session drive namespaces.
 	mountOptions.NetworkMode = endpoint.Scope == config.System
+	// A fresh slice keeps the shared mountlib.Opt defaults unmodified.
+	mountOptions.ExtraFlags = append(append([]string(nil), mountOptions.ExtraFlags...), FileSystemNameFlag())
 	vfsOptions := vfscommon.Opt
 	point := mountlib.NewMountPoint(
 		mount,
