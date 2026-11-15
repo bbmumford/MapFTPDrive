@@ -46,7 +46,7 @@ func run(args []string) error {
 		}
 		return launchUI(config.Scope(*scope))
 	case "install":
-		return installExplorerIntegration()
+		return installMachine()
 	case "prepare-system-data":
 		return prepareSystemData()
 	case "install-dependencies":
@@ -60,7 +60,7 @@ func run(args []string) error {
 		}
 		return installDependencies(*source)
 	case "uninstall":
-		return uninstallExplorerIntegration()
+		return uninstallMachine()
 	case "service":
 		return runService()
 	case "daemon":

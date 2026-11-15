@@ -64,11 +64,39 @@ Name: "{autodesktop}\MapFTPDrive"; Filename: "{app}\MapFTPDrive.exe"; Tasks: des
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Registry]
+; One machine-wide startup entry starts each signed-in user's host.
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "MapFTPDrive"; ValueData: """{app}\MapFTPDrive.exe"" daemon --scope user"; Flags: uninsdeletevalue
+; Explorer verbs, registered machine-wide exactly as the MSI does.
+; internal/explorer/verbs.go holds the same table; verbs_test.go fails when
+; these lines diverge from it.
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDrive"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Map FTP Drive"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDrive"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\MapFTPDrive.exe,0"
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDrive\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" map --scope user"
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Map FTP Drive (system-wide)"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\MapFTPDrive.exe,0"
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem"; ValueType: string; ValueName: "Extended"; ValueData: ""
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem"; ValueType: string; ValueName: "HasLUAShield"; ValueData: ""
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveSystem\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" map --scope system"
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveMount"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Mount FTP Drive"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveMount"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\MapFTPDrive.exe,0"
+Root: HKLM; Subkey: "Software\Classes\CLSID\{{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\MapFTPDriveMount\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" mount"
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveUnmount"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Unmount FTP Drive"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveUnmount"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\MapFTPDrive.exe,0"
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveUnmount"; ValueType: string; ValueName: "AppliesTo"; ValueData: "System.Volume.FileSystem:=""FUSE-MapFTP"""
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveUnmount\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" unmount --drive ""%V."""
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRename"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Rename FTP Drive"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRename"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\MapFTPDrive.exe,0"
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRename"; ValueType: string; ValueName: "AppliesTo"; ValueData: "System.Volume.FileSystem:=""FUSE-MapFTP"""
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRename\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" rename --drive ""%V."""
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Remove FTP Drive"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\MapFTPDrive.exe,0"
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove"; ValueType: string; ValueName: "Extended"; ValueData: ""
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove"; ValueType: string; ValueName: "AppliesTo"; ValueData: "System.Volume.FileSystem:=""FUSE-MapFTP"""
+Root: HKLM; Subkey: "Software\Classes\Drive\shell\MapFTPDriveRemove\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MapFTPDrive.exe"" remove --drive ""%V."""
 
 [Run]
 Filename: "{sys}\msiexec.exe"; Parameters: "/i ""{tmp}\winfsp.msi"" /qn /norestart"; StatusMsg: "Installing the WinFsp filesystem runtime..."; Flags: waituntilterminated
-Filename: "{app}\MapFTPDrive.exe"; Parameters: "install"; StatusMsg: "Registering Explorer commands..."; Flags: runhidden waituntilterminated
+Filename: "{app}\MapFTPDrive.exe"; Parameters: "install"; StatusMsg: "Securing MapFTPDrive data and installing its service..."; Flags: runhidden waituntilterminated
 Filename: "{app}\MapFTPDrive.exe"; Description: "Launch MapFTPDrive"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

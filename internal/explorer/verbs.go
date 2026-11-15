@@ -73,8 +73,8 @@ func IconLocation(executable string) string {
 
 // NormalizeDrive reduces a --drive argument to its upper-case drive letter.
 // It accepts X, X:, X:\ and X:\. as well as the X:" form produced by a
-// quoted "%V" registration, so verbs registered by any installer version
-// resolve to the same drive. Anything else, such as a directory path, is
+// quoted "%V" registration, so a verb registered with either quoting
+// resolves to the same drive. Anything else, such as a directory path, is
 // rejected before it reaches the managed-drive lookup.
 func NormalizeDrive(argument string) (string, error) {
 	value := strings.TrimSpace(argument)

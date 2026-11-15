@@ -103,12 +103,17 @@ func launchUI(scope config.Scope) error {
 	return nil
 }
 
-func installExplorerIntegration() error {
+// installMachine is the EXE installer's post-copy step, run elevated. The
+// installer itself writes the machine-wide Explorer verbs and Run entry;
+// this secures the system data directory, removes the per-user
+// registration of the installing account (see RemoveUserRegistration), and
+// installs or updates the service.
+func installMachine() error {
 	if err := prepareSystemData(); err != nil {
 		return err
 	}
-	if err := explorer.Install(); err != nil {
-		return err
+	if err := explorer.RemoveUserRegistration(); err != nil {
+		return fmt.Errorf("remove per-user Explorer registration: %w", err)
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -127,10 +132,15 @@ func prepareSystemData() error {
 	return service.RegisterEventSource()
 }
 
-func uninstallExplorerIntegration() error {
-	explorerErr := explorer.Uninstall()
-	serviceErr := service.Uninstall()
-	return errors.Join(explorerErr, serviceErr)
+// uninstallMachine is the EXE uninstaller's pre-delete step: it removes the
+// service, its event log source and any per-user registration of the
+// uninstalling account. The uninstaller deletes the machine-wide verbs.
+func uninstallMachine() error {
+	return errors.Join(
+		explorer.RemoveUserRegistration(),
+		service.Uninstall(),
+		service.RemoveEventSource(),
+	)
 }
 
 func runService() error {

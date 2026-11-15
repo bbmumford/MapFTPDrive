@@ -18,9 +18,14 @@ separately.
 
 ## Elevation
 
-The normal Explorer verb is registered under HKCU and opens the mapper
-unelevated. The extended verb has the `Extended` and `HasLUAShield` registry
-values and relaunches the system-scope operation with `runas`. The elevated
+Both installers register every Explorer verb machine-wide under
+`HKLM\Software\Classes` and one startup entry under HKLM's `Run` key; the
+program itself never writes verbs into a user's hive. A per-user copy of
+these keys would shadow the machine-wide verbs for that user, so the EXE's
+`install` and `uninstall` steps delete any copy in the installing account's
+hive. The normal verb opens the mapper unelevated. The extended verb has
+the `Extended` and `HasLUAShield` registry values and relaunches the
+system-scope operation with `runas`. The elevated
 process sends the definition and a protected credential to the installed
 service. Merely holding Shift does not silently grant system scope; Windows
 still displays its UAC consent UI.
@@ -120,7 +125,8 @@ Explorer expands `%V` for a drive to its root, such as `X:\`. The verbs pass
 `--drive "%V."`: quoting `"%V"` alone would let the root's trailing
 backslash escape the closing quote, and the program would receive `X:"`.
 The drive argument is normalised to a single letter (`X`, `X:`, `X:\`,
-`X:\.` and the legacy `X:"` are accepted; paths are rejected).
+`X:\.` and the `X:"` that a quoted `"%V"` produces are accepted; paths are
+rejected).
 `internal/explorer/verbs_test.go` parses the exact command strings from the
 Go verb table and both installer sources with the argv rules Go uses on
 Windows.

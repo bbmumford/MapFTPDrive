@@ -98,7 +98,7 @@ func TestDriveVerbCommandsYieldTheSelectedDrive(t *testing.T) {
 	}
 }
 
-func TestQuotedRootRegistrationStillResolves(t *testing.T) {
+func TestQuotedRootRegistrationResolves(t *testing.T) {
 	// A verb registered as --drive "%V" hands the program X:" because the
 	// root's trailing backslash escapes the closing quote.
 	argv := commandLineToArgv(expandDrive(`"`+installedExecutable+`" unmount --drive "%V"`, `X:\`))
@@ -244,6 +244,110 @@ func wixRegistryValues(t *testing.T, data []byte) map[string]registryKey {
 		values[key][attributes["Name"]] = attributes["Value"]
 	}
 	return values
+}
+
+// innoParameters splits one Inno Setup section line into its
+// "Name: value" parameters. Quoted values use "" for a literal quote.
+func innoParameters(t *testing.T, line string) map[string]string {
+	t.Helper()
+	parameters := make(map[string]string)
+	for rest := strings.TrimSpace(line); rest != ""; {
+		name, after, ok := strings.Cut(rest, ":")
+		if !ok {
+			t.Fatalf("malformed Inno parameter in %q", line)
+		}
+		after = strings.TrimLeft(after, " ")
+		var value strings.Builder
+		if strings.HasPrefix(after, `"`) {
+			index := 1
+			for {
+				if index >= len(after) {
+					t.Fatalf("unterminated Inno string in %q", line)
+				}
+				if after[index] == '"' {
+					if index+1 < len(after) && after[index+1] == '"' {
+						value.WriteByte('"')
+						index += 2
+						continue
+					}
+					index++
+					break
+				}
+				value.WriteByte(after[index])
+				index++
+			}
+			after = after[index:]
+		} else {
+			end := strings.Index(after, ";")
+			if end < 0 {
+				end = len(after)
+			}
+			value.WriteString(strings.TrimSpace(after[:end]))
+			after = after[end:]
+		}
+		parameters[strings.TrimSpace(name)] = value.String()
+		rest = strings.TrimLeft(strings.TrimPrefix(strings.TrimLeft(after, " "), ";"), " ")
+	}
+	return parameters
+}
+
+// innoRegistryValues collects the HKLM values of an Inno Setup [Registry]
+// section, resolving the {{ escape for a literal brace.
+func innoRegistryValues(t *testing.T, data []byte) map[string]registryKey {
+	t.Helper()
+	values := make(map[string]registryKey)
+	section := ""
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			section = line
+			continue
+		}
+		if section != "[Registry]" {
+			continue
+		}
+		parameters := innoParameters(t, line)
+		if parameters["Root"] != "HKLM" {
+			continue
+		}
+		key := strings.ReplaceAll(parameters["Subkey"], "{{", "{")
+		if values[key] == nil {
+			values[key] = make(registryKey)
+		}
+		values[key][parameters["ValueName"]] = parameters["ValueData"]
+	}
+	return values
+}
+
+func TestEXERegistersTheVerbTable(t *testing.T) {
+	values := innoRegistryValues(t, repoFile(t, "installer", "MapFTPDrive.iss"))
+	checkInstallerVerbs(t, "MapFTPDrive.iss", values, `{app}\MapFTPDrive.exe`, installedExecutable)
+}
+
+func TestInstallersRegisterOnlyTheMachineRunEntry(t *testing.T) {
+	const run = `Software\Microsoft\Windows\CurrentVersion\Run`
+	want := `"` + installedExecutable + `" daemon --scope user`
+	for name, values := range map[string]map[string]registryKey{
+		"MapFTPDrive.wxs": wixRegistryValues(t, repoFile(t, "installer", "MapFTPDrive.wxs")),
+		"MapFTPDrive.iss": innoRegistryValues(t, repoFile(t, "installer", "MapFTPDrive.iss")),
+	} {
+		entry := values[run]["MapFTPDrive"]
+		entry = strings.NewReplacer(`[INSTALLFOLDER]MapFTPDrive.exe`, installedExecutable, `{app}\MapFTPDrive.exe`, installedExecutable).Replace(entry)
+		if entry != want {
+			t.Errorf("%s HKLM Run entry = %q, want %q", name, entry, want)
+		}
+	}
+	for _, path := range []string{"MapFTPDrive.wxs", "MapFTPDrive.iss"} {
+		source := string(repoFile(t, "installer", path))
+		for _, hive := range []string{`Root="HKCU"`, "Root: HKCU", "HKCU\\", "HKEY_CURRENT_USER"} {
+			if strings.Contains(source, hive) {
+				t.Errorf("%s writes to the per-user hive (%s)", path, hive)
+			}
+		}
+	}
 }
 
 func TestMSIRegistersTheVerbTable(t *testing.T) {
