@@ -62,7 +62,7 @@ func installDependencies(winfspMSI string) error {
 
 func launchUI(scope config.Scope) error {
 	if scope == config.System && !windows.GetCurrentProcessToken().IsElevated() {
-		return relaunchElevated("map --scope system")
+		return relaunchElevated("map", "--scope", "system")
 	}
 	result, err := ui.ShowMapper(scope)
 	if errors.Is(err, ui.ErrCancelled) {
@@ -80,8 +80,7 @@ func launchUI(scope config.Scope) error {
 	if result.Endpoint.Protocol == config.SFTP {
 		key, scanErr := security.ScanSFTPHostKey(result.Endpoint)
 		if scanErr != nil {
-			ui.ShowError("Unable to verify SFTP server", scanErr)
-			return scanErr
+			return fmt.Errorf("unable to verify the SFTP server: %w", scanErr)
 		}
 		if !ui.ConfirmHostKey(result.Endpoint.Host, key.Algorithm, key.Fingerprint) {
 			return nil
@@ -99,9 +98,9 @@ func launchUI(scope config.Scope) error {
 		Password:  result.Password,
 	})
 	if err != nil {
-		ui.ShowError("Unable to map drive", err)
+		return fmt.Errorf("unable to map the drive: %w", err)
 	}
-	return err
+	return nil
 }
 
 func installExplorerIntegration() error {
@@ -134,17 +133,20 @@ func runDaemon(scope config.Scope) error {
 	return host.Run(ctx, scope)
 }
 
+// runDriveAction performs action on the managed drive with the given
+// upper-case letter. System drives are handled by an elevated copy of this
+// process, which receives the same arguments.
 func runDriveAction(action, drive, name string) error {
 	scope, endpoint, err := findManagedDrive(drive)
 	if err != nil {
 		return err
 	}
 	if scope == config.System && !windows.GetCurrentProcessToken().IsElevated() {
-		arguments := fmt.Sprintf(`%s --drive "%s"`, action, drive)
+		arguments := []string{action, "--drive", drive}
 		if name != "" {
-			arguments += fmt.Sprintf(` --name "%s"`, strings.ReplaceAll(name, `"`, ``))
+			arguments = append(arguments, "--name", name)
 		}
-		return relaunchElevated(arguments)
+		return relaunchElevated(arguments...)
 	}
 	if action == "remove" && !ui.ConfirmRemove(endpoint.Name, endpoint.DriveLetter) {
 		return nil
@@ -164,25 +166,67 @@ func runDriveAction(action, drive, name string) error {
 	operation := control.Operation(action)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	err = control.Send(ctx, scope, control.Request{Operation: operation, Drive: drive, Name: name})
-	if err != nil {
-		ui.ShowError("MapFTPDrive", err)
-	}
-	return err
+	return control.Send(ctx, scope, control.Request{Operation: operation, Drive: drive, Name: name})
 }
 
-func findManagedDrive(drive string) (config.Scope, config.Endpoint, error) {
+// mountUnmountedDrive lets the user choose one of the managed drives that
+// Unmount disabled and mounts it again. It backs the This PC "Mount FTP
+// Drive" verb: an unmounted drive has no drive-letter item to right-click.
+func mountUnmountedDrive() error {
+	var choices []config.Endpoint
+	for _, endpoint := range managedDrives() {
+		if endpoint.Disabled {
+			choices = append(choices, endpoint)
+		}
+	}
+	if len(choices) == 0 {
+		ui.ShowInfo("Mount FTP Drive", "Every MapFTPDrive drive is already mounted.\n\nUse Map FTP Drive to add a new one.")
+		return nil
+	}
+	labels := make([]string, len(choices))
+	for index, endpoint := range choices {
+		labels[index] = fmt.Sprintf("%s:  %s", endpoint.DriveLetter, endpoint.Name)
+		if endpoint.Scope == config.System {
+			labels[index] += "  (system-wide)"
+		}
+	}
+	index, err := ui.PickOne("Mount FTP Drive", "Choose the drive to mount:", "Mount", labels)
+	if errors.Is(err, ui.ErrCancelled) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return runDriveAction("mount", choices[index].DriveLetter, "")
+}
+
+// managedDrives returns the endpoints this process can see in both scopes.
+// A store that cannot be read is skipped so the other scope stays usable.
+func managedDrives() []config.Endpoint {
+	var endpoints []config.Endpoint
 	for _, scope := range []config.Scope{config.User, config.System} {
 		path, err := config.DefaultPath(scope)
 		if err != nil {
 			continue
 		}
-		endpoint, err := config.NewStore(path).FindByDrive(drive)
-		if err == nil {
-			return scope, endpoint, nil
+		loaded, err := config.NewStore(path).Load()
+		if err != nil {
+			continue
+		}
+		endpoints = append(endpoints, loaded...)
+	}
+	return endpoints
+}
+
+// findManagedDrive resolves an upper-case drive letter to its managed
+// endpoint, preferring the user scope when both scopes claim the letter.
+func findManagedDrive(drive string) (config.Scope, config.Endpoint, error) {
+	for _, endpoint := range managedDrives() {
+		if endpoint.DriveLetter == drive {
+			return endpoint.Scope, endpoint, nil
 		}
 	}
-	return "", config.Endpoint{}, fmt.Errorf("drive %q is not managed by MapFTPDrive", drive)
+	return "", config.Endpoint{}, fmt.Errorf("drive %s: is not managed by MapFTPDrive", drive)
 }
 
 func ensureHost(scope config.Scope) error {
@@ -224,13 +268,50 @@ func ensureHost(scope config.Scope) error {
 	return errors.New("mount host did not become ready")
 }
 
-func relaunchElevated(arguments string) error {
+// relaunchElevated starts this executable with arguments through the UAC
+// consent prompt. Each argument is escaped with the rules the child's argv
+// parser reverses, so names with quotes, spaces or trailing backslashes
+// arrive unchanged. Declining the prompt is not an error.
+func relaunchElevated(arguments ...string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	verb, _ := windows.UTF16PtrFromString("runas")
-	file, _ := windows.UTF16PtrFromString(executable)
-	args, _ := windows.UTF16PtrFromString(arguments)
-	return windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL)
+	verb, err := windows.UTF16PtrFromString("runas")
+	if err != nil {
+		return err
+	}
+	file, err := windows.UTF16PtrFromString(executable)
+	if err != nil {
+		return err
+	}
+	args, err := windows.UTF16PtrFromString(elevatedCommandLine(arguments))
+	if err != nil {
+		return err
+	}
+	err = windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL)
+	if errors.Is(err, windows.ERROR_CANCELLED) {
+		return nil
+	}
+	return err
+}
+
+// elevatedCommandLine joins arguments into the parameter string that
+// ShellExecute passes to the elevated process.
+func elevatedCommandLine(arguments []string) string {
+	escaped := make([]string, len(arguments))
+	for index, argument := range arguments {
+		escaped[index] = syscall.EscapeArg(argument)
+	}
+	return strings.Join(escaped, " ")
+}
+
+// reportError writes err to stderr and, for commands started from Explorer
+// or the Start menu, also shows it in a message box because a GUI-subsystem
+// process has no console there.
+func reportError(err error, interactive bool) {
+	fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
+	if interactive {
+		ui.ShowError("MapFTPDrive", err)
+	}
 }

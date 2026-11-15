@@ -7,13 +7,30 @@ import (
 
 	"mapftpdrive/internal/buildinfo"
 	"mapftpdrive/internal/config"
+	"mapftpdrive/internal/explorer"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
+	args := os.Args[1:]
+	if err := run(args); err != nil {
+		reportError(err, interactiveCommand(args))
 		os.Exit(1)
 	}
+}
+
+// interactiveCommand reports whether args name a command that Explorer or
+// the Start menu starts. The executable uses the GUI subsystem, so those
+// invocations have no console and reportError must show a message box;
+// installer and service commands keep failing silently with an exit code.
+func interactiveCommand(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch args[0] {
+	case "map", "mount", "unmount", "remove", "rename":
+		return true
+	}
+	return false
 }
 
 func run(args []string) error {
@@ -59,9 +76,16 @@ func run(args []string) error {
 			return err
 		}
 		if *drive == "" {
+			if args[0] == "mount" {
+				return mountUnmountedDrive()
+			}
 			return fmt.Errorf("--drive is required")
 		}
-		return runDriveAction(args[0], *drive, *name)
+		letter, err := explorer.NormalizeDrive(*drive)
+		if err != nil {
+			return err
+		}
+		return runDriveAction(args[0], letter, *name)
 	case "version":
 		fmt.Printf("MapFTPDrive %s (%s, %s)\n", buildinfo.Version, buildinfo.Commit, buildinfo.Date)
 		return nil

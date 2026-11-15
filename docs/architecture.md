@@ -37,10 +37,39 @@ unmounts it, removes the definition, and deletes its credential.
 ## Explorer integration
 
 Static verbs are registered against the `CLSID_MyComputer` shell object for
-mapping. Managed drive verbs are registered with an application command
-that validates the selected drive against the endpoint store before acting.
-The system-wide mapping verb is marked `Extended`, so it appears only in the
-extended (Shift) menu on classic Windows Explorer.
+mapping (**Map FTP Drive**, **Map FTP Drive (system-wide)**) and for
+remounting a drive that **Unmount** disabled (**Mount FTP Drive**, which
+lists the unmounted managed drives: an unmounted drive has no drive item to
+right-click). The system-wide mapping verb is marked `Extended`, so it
+appears only in the extended (Shift) menu on classic Windows Explorer.
+
+Managed drive verbs (**Unmount**, **Rename**, **Remove**) are registered on
+`Drive\shell` with an `AppliesTo` condition:
+
+```text
+System.Volume.FileSystem:="FUSE-MapFTP"
+```
+
+Every MapFTPDrive mount passes `--FileSystemName=MapFTP` to WinFsp, which
+reports the volume's file system as `FUSE-MapFTP` (WinFsp adds the `FUSE-`
+prefix and keeps at most 15 characters). Explorer evaluates the condition per
+drive, so the verbs never appear on C:, removable media, SMB shares or other
+FUSE file systems. The condition is a display filter only: each command
+still resolves the selected drive against the managed endpoint stores and
+refuses anything else.
+
+Explorer expands `%V` for a drive to its root, such as `X:\`. The verbs pass
+`--drive "%V."`: quoting `"%V"` alone would let the root's trailing
+backslash escape the closing quote, and the program would receive `X:"`.
+The drive argument is normalised to a single letter (`X`, `X:`, `X:\`,
+`X:\.` and the legacy `X:"` are accepted; paths are rejected).
+`internal/explorer/verbs_test.go` parses the exact command strings from the
+Go verb table and both installer sources with the argv rules Go uses on
+Windows.
+
+Explorer starts these commands without a console. Errors from map, mount,
+unmount, rename and remove are therefore shown in a message box; installer
+and service commands report failure only through their exit code.
 
 ## Installation and dependencies
 

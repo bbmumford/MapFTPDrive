@@ -2,10 +2,14 @@
 
 package main
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"os"
 
-import "mapftpdrive/internal/config"
-import "mapftpdrive/internal/explorer"
+	"mapftpdrive/internal/config"
+	"mapftpdrive/internal/explorer"
+)
 
 var errWindowsOnly = errors.New("this application runs on Windows")
 
@@ -16,3 +20,8 @@ func uninstallExplorerIntegration() error         { return explorer.Uninstall() 
 func runService() error                           { return errWindowsOnly }
 func runDaemon(config.Scope) error                { return errWindowsOnly }
 func runDriveAction(string, string, string) error { return errWindowsOnly }
+func mountUnmountedDrive() error                  { return errWindowsOnly }
+
+func reportError(err error, _ bool) {
+	fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
+}
