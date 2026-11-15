@@ -88,6 +88,14 @@ GOOS=windows GOARCH=amd64 go build -mod=vendor ./cmd/mapftpdrive
 GOOS=windows GOARCH=arm64 go build -mod=vendor ./cmd/mapftpdrive
 ```
 
+The executable's application manifest (Common Controls 6, per-monitor v2
+DPI awareness, `asInvoker`, Windows 10/11), icon and version information
+come from `cmd/mapftpdrive/winres` and are linked from the committed
+`cmd/mapftpdrive/rsrc_windows_*.syso` files. After changing that directory,
+run `scripts/generate-resources.ps1` (PowerShell 7 on any OS; it runs the
+pinned `go-winres` through `go run`) and commit the regenerated files.
+`build-installer.ps1` regenerates them with the release version.
+
 ## Release artifacts
 
 Each release produces x64 and ARM64 artifacts in two formats:

@@ -17,6 +17,9 @@ $winfsp = Join-Path $build "winfsp.msi"
 
 New-Item -ItemType Directory -Force -Path $build, $output | Out-Null
 
+# Embed the manifest, icon and this build's version in the executable.
+& (Join-Path $PSScriptRoot "generate-resources.ps1") -Version $Version
+
 $env:GOOS = "windows"
 $env:GOARCH = $Architecture
 $env:CGO_ENABLED = "0"

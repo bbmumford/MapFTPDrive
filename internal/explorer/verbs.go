@@ -64,9 +64,11 @@ func (v Verb) CommandLine(executable string) string {
 	return `"` + executable + `" ` + v.Args
 }
 
-// IconLocation returns the Icon value shown beside every verb.
+// IconLocation returns the Icon value shown beside every verb: the first
+// icon resource of the executable, which scripts/generate-resources.ps1
+// embeds from cmd/mapftpdrive/winres.
 func IconLocation(executable string) string {
-	return executable
+	return executable + ",0"
 }
 
 // NormalizeDrive reduces a --drive argument to its upper-case drive letter.
