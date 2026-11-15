@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -122,11 +121,11 @@ func (s *Supervisor) Mount(ctx context.Context, endpoint config.Endpoint) error 
 		endpoint.Username = username
 	}
 	if endpoint.Protocol == config.SFTP && endpoint.KnownHost != "" {
-		knownHostsDir := filepath.Join(filepath.Dir(s.store.Path()), "known_hosts")
-		if err := os.MkdirAll(knownHostsDir, 0o700); err != nil {
+		layout := config.LayoutFor(s.store.Path())
+		if err := os.MkdirAll(layout.KnownHostsDir(), 0o700); err != nil {
 			return err
 		}
-		knownHostsFile := filepath.Join(knownHostsDir, endpoint.ID)
+		knownHostsFile := layout.KnownHostsFile(endpoint.ID)
 		if err := os.WriteFile(knownHostsFile, []byte(endpoint.KnownHost+"\n"), 0o600); err != nil {
 			return err
 		}
@@ -186,6 +185,9 @@ func (s *Supervisor) UnmountByDrive(drive string, retain bool) error {
 	}
 	removed, err := s.store.Remove(endpoint.ID)
 	if err != nil {
+		return err
+	}
+	if err := os.Remove(config.LayoutFor(s.store.Path()).KnownHostsFile(removed.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return s.credentials.Delete(removed.CredentialKey)
