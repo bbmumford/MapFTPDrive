@@ -31,8 +31,8 @@ filenames use no signing suffix; unsigned artifacts must end in `-unsigned`
 before the extension.
 
 Dependabot rebases open updates automatically and groups compatible
-minor/patch updates. rclone is excluded from automation because MapFTPDrive
-pins a reviewed commit and maintains extracted adapter code and provenance.
-Update rclone manually, compare commit dates as well as semantic versions,
-regenerate `vendor`, review the full dependency delta, and update
-`third_party/rclone/UPSTREAM.md`.
+minor/patch updates. rclone updates arrive as their own grouped pull request
+because MapFTPDrive maintains extracted adapter code and provenance. Before
+merging one, confirm the new commit descends from the recorded one,
+regenerate `vendor`, re-extract and re-patch the adapter, review the full
+dependency delta, and update `third_party/rclone/UPSTREAM.md`.

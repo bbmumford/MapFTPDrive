@@ -7,18 +7,24 @@ updates:
     rebase-strategy: auto
     open-pull-requests-limit: 5
     groups:
+      # A dependency joins the first group that matches it. rclone comes
+      # first so each rclone release arrives as its own single pull request:
+      # it carries the extracted mount adapter, which must be re-extracted
+      # and re-patched as third_party/rclone/UPSTREAM.md describes before
+      # the update merges.
+      rclone:
+        patterns:
+          - github.com/rclone/rclone
+        update-types:
+          - major
+          - minor
+          - patch
       go-minor-and-patch:
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-    ignore:
-      # rclone is pinned to a reviewed upstream commit and has locally
-      # extracted mount adapter code plus a provenance record. Dependabot can
-      # mistake an older stable tag for an upgrade from the newer pseudo-
-      # version, so maintainers update it manually.
-      - dependency-name: github.com/rclone/rclone
   - package-ecosystem: github-actions
     directory: /
     schedule:

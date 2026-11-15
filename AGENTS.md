@@ -97,11 +97,13 @@ shared WinFsp runtime installed.
   synchronized. A mismatch must fail packaging and CI.
 - The checked-in vendor tree is authoritative for release builds. Do not run
   an implicit dependency update during packaging.
-- Dependabot may group and rebase routine minor/patch updates. rclone is
-  intentionally excluded: update it manually only after reviewing commit
-  chronology, the extracted mount adapter, the vendor delta, and
-  `third_party/rclone/UPSTREAM.md`. A stable version number is not necessarily
-  newer than the pinned pseudo-version commit.
+- Dependabot may group and rebase routine minor/patch updates. rclone
+  updates arrive as their own grouped pull request; before merging one,
+  confirm the new commit descends from the recorded one, re-extract and
+  re-patch the mount adapter, review the vendor delta, and update
+  `third_party/rclone/UPSTREAM.md` as that file describes. If rclone is ever
+  pinned to a pseudo-version again, remember that a stable version number is
+  not necessarily newer than the pinned commit.
 - Update `CHANGELOG.md`, provenance records, screenshots, and user
   documentation before a stable release.
 
