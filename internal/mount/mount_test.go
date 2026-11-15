@@ -174,6 +174,27 @@ func TestMountSettings(t *testing.T) {
 	if len(prefixes) != 1 || prefixes[0] != `--VolumePrefix=\mapftpdrive\`+testID {
 		t.Fatalf("prefix flags = %v", prefixes)
 	}
+
+	// A 32-unit non-ASCII name is 64 bytes of UTF-8; mountlib would cut
+	// VolumeName to 32 bytes, so the full label must travel in ExtraOptions.
+	long := user
+	long.Name = strings.Repeat("ü", config.MaxNameLength)
+	mountOptions, _ = mountSettings(long)
+	labels := 0
+	for _, option := range mountOptions.ExtraOptions {
+		if strings.HasPrefix(option, "volname=") {
+			labels++
+			if option != "volname="+long.Name {
+				t.Fatalf("label option = %q", option)
+			}
+		}
+	}
+	if labels != 1 {
+		t.Fatalf("label options = %v", mountOptions.ExtraOptions)
+	}
+	if got := volumeLabelOption(`a,b\c`); got != `volname=a\,b\\c` {
+		t.Fatalf("escaped label = %q", got)
+	}
 }
 
 func TestBackendHasOption(t *testing.T) {

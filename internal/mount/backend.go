@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -220,11 +221,23 @@ func volumePrefixFlag(endpoint config.Endpoint) string {
 	return `--VolumePrefix=\mapftpdrive\` + endpoint.ID
 }
 
+// volumeLabelOption is the FUSE "volname=" option for a drive name, with
+// the option parser's separator (comma) and escape (backslash) escaped.
+// ValidateName already rejects both; escaping keeps the option well formed
+// regardless.
+func volumeLabelOption(name string) string {
+	escaped := strings.NewReplacer(`\`, `\\`, `,`, `\,`).Replace(name)
+	return "volname=" + escaped
+}
+
 // mountSettings derives the mountlib and VFS options for an endpoint.
-// VolumeName carries the raw drive name; the adapter escapes it for the
-// FUSE option parser and passes it as the volume label. The VFS caches
-// written files on disk so Office-style read/write opens, random writes and
-// upload retries work, and caches listings for dirCacheTime.
+// VolumeName carries the raw drive name, but mountlib cuts it to 32 bytes
+// before the cmount adapter sees it, which would shorten a valid non-ASCII
+// name; the full name therefore also travels as a "volname=" entry in
+// ExtraOptions, which the adapter passes through in place of its own label
+// option. The VFS caches written files on disk so Office-style read/write
+// opens, random writes and upload retries work, and caches listings for
+// dirCacheTime.
 func mountSettings(endpoint config.Endpoint) (mountlib.Options, vfscommon.Options) {
 	mountOptions := mountlib.Opt
 	mountOptions.VolumeName = endpoint.Name
@@ -234,7 +247,7 @@ func mountSettings(endpoint config.Endpoint) (mountlib.Options, vfscommon.Option
 		flags = append(flags, volumePrefixFlag(endpoint))
 	}
 	mountOptions.ExtraFlags = flags
-	mountOptions.ExtraOptions = append([]string(nil), mountOptions.ExtraOptions...)
+	mountOptions.ExtraOptions = append(append([]string(nil), mountOptions.ExtraOptions...), volumeLabelOption(endpoint.Name))
 
 	vfsOptions := vfscommon.Opt
 	vfsOptions.CacheMode = vfscommon.CacheModeWrites
