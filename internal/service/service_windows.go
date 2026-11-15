@@ -39,7 +39,10 @@ func (handler) Execute(_ []string, requests <-chan svc.ChangeRequest, changes ch
 				changes <- svc.Status{State: svc.StopPending}
 				cancel()
 				select {
-				case <-done:
+				case err := <-done:
+					if err != nil {
+						return true, 1
+					}
 				case <-time.After(20 * time.Second):
 					return true, 2
 				}
