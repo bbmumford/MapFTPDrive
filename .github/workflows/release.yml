@@ -10,36 +10,51 @@ on:
         required: true
         default: 0.0.0-dev
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+# No job inherits a token scope; each job below names only what it uses.
+permissions: {}
 
 jobs:
+  checks:
+    name: Test, vet, lint and vulnerability gate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Installer ${{ matrix.arch }}
+    needs: checks
     runs-on: windows-latest
+    # This job holds the signing secrets, so its token can only read the
+    # repository; provenance and publishing happen in the publish job.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          # A release build never restores a cache another workflow wrote.
+          cache: false
       - name: Install WiX Toolset
         shell: pwsh
         run: dotnet tool install --global wix --version 6.0.2
       - name: Resolve version
         id: version
         shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          $version = if ("${{ github.event_name }}" -eq "push") {
-            "${{ github.ref_name }}".TrimStart("v")
-          } else {
-            "${{ inputs.version }}"
+          $version = if ($env:EVENT_NAME -eq "push") { $env:REF_NAME.TrimStart("v") } else { $env:INPUT_VERSION }
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+            throw "Version '$version' is not MAJOR.MINOR.PATCH[-PRERELEASE]"
           }
           "value=$version" >> $env:GITHUB_OUTPUT
       - name: Build and package
@@ -61,13 +76,7 @@ jobs:
           ./scripts/build-msi.ps1
           -Architecture "${{ matrix.arch }}"
           -Version "${{ steps.version.outputs.value }}"
-      - name: Attest installer provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: |
-            installer/output/MapFTPDrive-*-setup*.exe
-            installer/output/MapFTPDrive-*.msi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-${{ matrix.arch }}
           path: |
@@ -77,14 +86,99 @@ jobs:
             installer/output/MapFTPDrive-*.msi.sha256
           if-no-files-found: error
 
+  smoke:
+    name: MSI smoke test ${{ matrix.arch }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer-${{ matrix.arch }}
+          path: dist
+      - name: Install, exercise and uninstall the MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msi = Get-ChildItem dist -Filter "MapFTPDrive-*.msi" | Select-Object -First 1
+          if (-not $msi) { throw "No MSI in the installer artifact" }
+
+          function Invoke-Msiexec([string]$Action, [string]$Log) {
+            # 1618: another installation (the asynchronous WinFsp helper)
+            # still holds the Windows Installer mutex.
+            for ($attempt = 1; $attempt -le 36; $attempt++) {
+              $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+                $Action, "`"$($msi.FullName)`"", "/qn", "/norestart", "/l*v", "`"$Log`"")
+              if ($process.ExitCode -ne 1618) { break }
+              Start-Sleep -Seconds 5
+            }
+            if ($process.ExitCode -notin 0, 3010) {
+              Get-Content $Log -Tail 200
+              throw "msiexec $Action exited with $($process.ExitCode)"
+            }
+          }
+
+          Invoke-Msiexec "/i" (Join-Path $env:RUNNER_TEMP "install.log")
+
+          $service = Get-CimInstance Win32_Service -Filter "Name='MapFTPDrive'"
+          if (-not $service) { throw "The MapFTPDrive service is not registered" }
+          if ($service.StartMode -ne "Auto") { throw "Service start mode is $($service.StartMode), expected Auto" }
+          if ($service.PathName -notlike "*MapFTPDrive.exe*service*") { throw "Unexpected service command: $($service.PathName)" }
+          Start-Sleep -Seconds 5
+          $state = (Get-Service MapFTPDrive).Status
+          if ($state -eq "Stopped") { throw "The MapFTPDrive service stopped after installation" }
+          Write-Output "Service registered: $($service.PathName) ($state)"
+
+          $exe = Join-Path $env:ProgramFiles "MapFTPDrive\MapFTPDrive.exe"
+          $stdout = Join-Path $env:RUNNER_TEMP "version.txt"
+          $process = Start-Process $exe -ArgumentList "version" -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout
+          $version = Get-Content $stdout -Raw
+          if ($process.ExitCode -ne 0 -or $version -notmatch '^MapFTPDrive ') {
+            throw "MapFTPDrive.exe version failed ($($process.ExitCode)): $version"
+          }
+          Write-Output $version.Trim()
+
+          # The MSI hands WinFsp to an asynchronous helper; report its state
+          # and give it time to release the installer mutex.
+          for ($i = 0; $i -lt 60 -and -not (Test-Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp"); $i++) {
+            Start-Sleep -Seconds 5
+          }
+          $winfsp = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\WinFsp" -ErrorAction SilentlyContinue
+          Write-Output "WinFsp after install: $(if ($winfsp) { $winfsp.InstallDir } else { 'not installed' })"
+
+          Invoke-Msiexec "/x" (Join-Path $env:RUNNER_TEMP "uninstall.log")
+
+          if (Get-Service MapFTPDrive -ErrorAction SilentlyContinue) { throw "The service remains after uninstall" }
+          if (Test-Path $exe) { throw "$exe remains after uninstall" }
+          Write-Output "Uninstalled; WinFsp present: $(Test-Path 'HKLM:\SOFTWARE\WOW6432Node\WinFsp')"
+      - name: Upload installer logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-logs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/*.log
+          if-no-files-found: ignore
+
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push'
-    needs: build
+    needs: [checks, build, smoke]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: installer-*
           path: dist
@@ -92,7 +186,14 @@ jobs:
       - name: Build combined checksum manifest
         working-directory: dist
         run: cat *.sha256 | sort > SHA256SUMS
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/MapFTPDrive-*-setup*.exe
+            dist/MapFTPDrive-*.msi
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --title "MapFTPDrive ${GITHUB_REF_NAME}"

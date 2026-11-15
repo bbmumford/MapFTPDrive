@@ -85,10 +85,16 @@ shared WinFsp runtime installed.
   PFX and password; unsigned artifacts must be clearly identified as such.
 - Signed artifacts use the clean base filename without a suffix. Never add
   `-signed`; only unsigned artifacts use `-unsigned`.
-- Pin third-party Actions to reviewed major versions and external binary
-  downloads to both a version and SHA-256.
-- Keep the WinFsp URL and SHA-256 in `build-installer.ps1` and
-  `build-msi.ps1` synchronized. A mismatch must fail packaging.
+- Pin every Action by full commit SHA with its release in a trailing
+  comment (`uses: owner/action@<sha> # vX.Y.Z`) so Dependabot can propose
+  reviewed updates, and pin external binary downloads to both a version and
+  SHA-256.
+- Give each workflow job only the token permissions it uses. Only the
+  release publish job may hold `contents: write`, `id-token: write` and
+  `attestations: write`; the job that holds signing secrets reads only.
+- Keep the WinFsp URL and SHA-256 in `build-installer.ps1`,
+  `build-msi.ps1` and the `WINFSP_*` variables of `.github/workflows/ci.yml`
+  synchronized. A mismatch must fail packaging and CI.
 - The checked-in vendor tree is authoritative for release builds. Do not run
   an implicit dependency update during packaging.
 - Dependabot may group and rebase routine minor/patch updates. rclone is
