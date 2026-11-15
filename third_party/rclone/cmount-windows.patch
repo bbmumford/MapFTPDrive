@@ -1,0 +1,334 @@
+diff -u a/internal/mount/cmount_fs_windows.go b/internal/mount/cmount_fs_windows.go
+--- a/internal/mount/cmount_fs_windows.go
++++ b/internal/mount/cmount_fs_windows.go
+@@ -6,7 +6,6 @@
+ 	"io"
+ 	"os"
+ 	"path"
+-	"runtime"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -64,7 +63,10 @@
+ 
+ // get the handle for fh, call with the lock held
+ func (fsys *FS) _getHandle(fh uint64) (i int, handle vfs.Handle, errc int) {
+-	if fh > uint64(len(fsys.handles)) {
++	// MapFTPDrive local patch: fh == len(fsys.handles) is already out of
++	// range; the upstream ">" let it reach the index below and panic inside
++	// a WinFsp callback, which terminates the whole mount host.
++	if fh >= uint64(len(fsys.handles)) {
+ 		fs.Debugf(nil, "Bad file handle: too big: 0x%X", fh)
+ 		return i, nil, -fuse.EBADF
+ 	}
+@@ -210,13 +212,9 @@
+ 
+ 	// We can't seek in directories and FUSE should know that so
+ 	// return an error if ofst is ever set.
++	// MapFTPDrive local patch: the OpenBSD-only branch is removed because
++	// this file builds only for Windows.
+ 	if ofst > 0 {
+-		// However openbsd doesn't seem to know this - perhaps a bug in its
+-		// FUSE implementation or a bug in cgofuse?
+-		// See: https://github.com/billziss-gh/cgofuse/issues/49
+-		if runtime.GOOS == "openbsd" {
+-			return 0
+-		}
+ 		return -fuse.ESPIPE
+ 	}
+ 
+@@ -536,56 +534,31 @@
+ 	return 0
+ }
+ 
+-// #9908: simulate macFUSE behaviour (discard setxattr calls) - otherwise Finder cannot copy files onto the mount
+-func shouldIgnoreAppleXattr(opt *mountlib.Options) bool {
+-	if !opt.NoAppleXattr {
+-		return false
+-	}
+-	if runtime.GOOS != "darwin" {
+-		return false
+-	}
+-	// only flip the behaviour on FSKit
+-	for _, o := range opt.ExtraOptions {
+-		if strings.TrimSpace(o) == "backend=fskit" {
+-			return true
+-		}
+-	}
+-	return false
+-}
++// MapFTPDrive local patch: the macOS FSKit extended-attribute emulation
++// (shouldIgnoreAppleXattr) is removed because this file builds only for
++// Windows, where it always returned false; every xattr call reports ENOSYS.
+ 
+ // Setxattr sets extended attributes.
+ func (fsys *FS) Setxattr(path string, name string, value []byte, flags int) (errc int) {
+ 	defer log.Trace(path, "name=%q, value=%q, flags=%d", name, value, flags)("errc=%d", &errc)
+-	if shouldIgnoreAppleXattr(fsys.opt) && strings.HasPrefix(name, "com.apple.") {
+-		return 0
+-	}
+ 	return -fuse.ENOSYS
+ }
+ 
+ // Getxattr gets extended attributes.
+ func (fsys *FS) Getxattr(path string, name string) (errc int, value []byte) {
+ 	defer log.Trace(path, "name=%q", name)("errc=%d, value=%q", &errc, &value)
+-	if shouldIgnoreAppleXattr(fsys.opt) && strings.HasPrefix(name, "com.apple.") {
+-		return -fuse.ENOATTR, nil
+-	}
+ 	return -fuse.ENOSYS, nil
+ }
+ 
+ // Removexattr removes extended attributes.
+ func (fsys *FS) Removexattr(path string, name string) (errc int) {
+ 	defer log.Trace(path, "name=%q", name)("errc=%d", &errc)
+-	if shouldIgnoreAppleXattr(fsys.opt) && strings.HasPrefix(name, "com.apple.") {
+-		return 0
+-	}
+ 	return -fuse.ENOSYS
+ }
+ 
+ // Listxattr lists extended attributes.
+ func (fsys *FS) Listxattr(path string, fill func(name string) bool) (errc int) {
+ 	defer log.Trace(path, "fill=%p", fill)("errc=%d", &errc)
+-	if shouldIgnoreAppleXattr(fsys.opt) {
+-		return 0
+-	}
+ 	return -fuse.ENOSYS
+ }
+ 
+diff -u a/internal/mount/cmount_mount_windows.go b/internal/mount/cmount_mount_windows.go
+--- a/internal/mount/cmount_mount_windows.go
++++ b/internal/mount/cmount_mount_windows.go
+@@ -9,31 +9,21 @@
+ 	"errors"
+ 	"fmt"
+ 	"os"
+-	"runtime"
+ 	"strings"
+ 	"time"
+ 
+ 	"github.com/rclone/rclone/cmd/mountlib"
+ 	"github.com/rclone/rclone/fs"
+ 	"github.com/rclone/rclone/lib/atexit"
+-	"github.com/rclone/rclone/lib/buildinfo"
+ 	"github.com/rclone/rclone/vfs"
+ 	"github.com/winfsp/cgofuse/fuse"
+ )
+ 
+-func init() {
+-	name := "cmount"
+-	cmountOnly := runtime.GOOS != "linux" // rclone mount only works for linux
+-	if cmountOnly {
+-		name = "mount"
+-	}
+-	cmd := mountlib.NewMountCommand(name, false, mount)
+-	if cmountOnly {
+-		cmd.Aliases = append(cmd.Aliases, "cmount")
+-	}
+-	mountlib.AddRc("cmount", mount)
+-	buildinfo.Tags = append(buildinfo.Tags, "cmount")
+-}
++// MapFTPDrive local patch: upstream's init registered a "mount" cobra
++// command, the "mount/*" remote-control calls and a build tag. MapFTPDrive
++// has no rclone command line or remote-control server; the engine calls
++// mount directly through mountlib.NewMountPoint, so the registration is
++// removed to keep that surface out of the process.
+ 
+ // mountOptions configures the options from the command line flags
+ func mountOptions(VFS *vfs.VFS, device string, mountpoint string, opt *mountlib.Options) (options []string) {
+@@ -45,58 +35,15 @@
+ 		options = append(options, "-o", "debug")
+ 	}
+ 
+-	if runtime.GOOS == "windows" {
+-		options = append(options, "-o", "uid=-1")
+-		options = append(options, "-o", "gid=-1")
+-		options = append(options, "--FileSystemName=rclone")
+-		if opt.VolumeName != "" {
+-			if opt.NetworkMode {
+-				options = append(options, "--VolumePrefix="+opt.VolumeName)
+-			} else {
+-				options = append(options, "-o", "volname="+opt.VolumeName)
+-			}
+-		}
+-	} else {
+-		options = append(options, "-o", "fsname="+device)
+-		options = append(options, "-o", "subtype=rclone")
+-		if runtime.GOOS != "openbsd" {
+-			options = append(options, "-o", fmt.Sprintf("max_readahead=%d", opt.MaxReadAhead))
+-			// This causes FUSE to supply O_TRUNC with the Open
+-			// call which is more efficient for cmount.  However
+-			// it does not work with cgofuse on Windows with
+-			// WinFSP so cmount must work with or without it.
+-			options = append(options, "-o", "atomic_o_trunc")
+-		}
+-		if opt.DaemonTimeout != 0 {
+-			options = append(options, "-o", fmt.Sprintf("daemon_timeout=%d", int(time.Duration(opt.DaemonTimeout).Seconds())))
+-		}
+-		if opt.AllowOther {
+-			options = append(options, "-o", "allow_other")
+-		}
+-		if opt.AllowRoot {
+-			options = append(options, "-o", "allow_root")
+-		}
+-		if opt.DefaultPermissions {
+-			options = append(options, "-o", "default_permissions")
+-		}
+-		if VFS.Opt.ReadOnly {
+-			options = append(options, "-o", "ro")
+-		}
+-		//if opt.WritebackCache {
+-		// FIXME? options = append(options, "-o", WritebackCache())
+-		//}
+-		if runtime.GOOS == "darwin" {
+-			if opt.VolumeName != "" {
+-				options = append(options, "-o", "volname="+opt.VolumeName)
+-			}
+-			if opt.NoAppleDouble {
+-				options = append(options, "-o", "noappledouble")
+-			}
+-			if opt.NoAppleXattr {
+-				options = append(options, "-o", "noapplexattr")
+-			}
+-		}
+-	}
++	// MapFTPDrive local patch: only the WinFsp options remain because this
++	// file builds only for Windows. The label is VolumeName, escaped by
++	// volumeLabelOptions, for disk and network volumes alike; the network
++	// prefix is the --VolumePrefix entry that handleVolumeName validated in
++	// ExtraFlags, appended below (cmount_volume.go).
++	options = append(options, "-o", "uid=-1")
++	options = append(options, "-o", "gid=-1")
++	options = append(options, "--FileSystemName=rclone")
++	options = append(options, volumeLabelOptions(opt.VolumeName, opt.ExtraOptions)...)
+ 	for _, option := range opt.ExtraOptions {
+ 		options = append(options, "-o", option)
+ 	}
+@@ -184,13 +131,13 @@
+ 		}
+ 		if umountOK {
+ 			fs.Debugf(nil, "Unmounted successfully")
+-			if runtime.GOOS == "windows" {
+-				if !waitFor(func() bool {
+-					_, err := os.Stat(mountpoint)
+-					return err != nil
+-				}) {
+-					fs.Errorf(nil, "mountpoint %q didn't disappear after unmount - continuing anyway", mountpoint)
+-				}
++			// MapFTPDrive local patch: the Windows-only wait runs
++			// unconditionally because this file builds only for Windows.
++			if !waitFor(func() bool {
++				_, err := os.Stat(mountpoint)
++				return err != nil
++			}) {
++				fs.Errorf(nil, "mountpoint %q didn't disappear after unmount - continuing anyway", mountpoint)
+ 			}
+ 			return nil
+ 		}
+@@ -209,13 +156,13 @@
+ 
+ 	// Wait for the mount point to be available on Windows
+ 	// On Windows the Init signal comes slightly before the mount is ready
+-	if runtime.GOOS == "windows" {
+-		if !waitFor(func() bool {
+-			_, err := os.Stat(mountpoint)
+-			return err == nil
+-		}) {
+-			fs.Errorf(nil, "mountpoint %q didn't became available on mount - continuing anyway", mountpoint)
+-		}
++	// MapFTPDrive local patch: unconditional because this file builds only
++	// for Windows.
++	if !waitFor(func() bool {
++		_, err := os.Stat(mountpoint)
++		return err == nil
++	}) {
++		fs.Errorf(nil, "mountpoint %q didn't became available on mount - continuing anyway", mountpoint)
+ 	}
+ 
+ 	return errChan, unmount, mountpoint, nil
+diff -u a/internal/mount/cmount_mountpoint_windows.go b/internal/mount/cmount_mountpoint_windows.go
+--- a/internal/mount/cmount_mountpoint_windows.go
++++ b/internal/mount/cmount_mountpoint_windows.go
+@@ -16,7 +16,6 @@
+ 
+ var isDriveRegex = regexp.MustCompile(`^[a-zA-Z]\:$`)
+ var isDriveRootPathRegex = regexp.MustCompile(`^[a-zA-Z]\:\\$`)
+-var isDriveOrRootPathRegex = regexp.MustCompile(`^[a-zA-Z]\:\\?$`)
+ var isNetworkSharePathRegex = regexp.MustCompile(`^\\\\[^\\\?]+\\[^\\]`)
+ 
+ // isNetworkSharePath returns true if the given string is a valid network share path,
+@@ -46,11 +45,8 @@
+ 	return isDriveRootPathRegex.MatchString(l)
+ }
+ 
+-// isDriveOrRootPath returns true if given string is a drive letter followed by the volume separator,
+-// and optionally a path separator. See isDrive and isDriveRootPath functions.
+-func isDriveOrRootPath(l string) bool {
+-	return isDriveOrRootPathRegex.MatchString(l)
+-}
++// MapFTPDrive local patch: isDriveOrRootPath and its regular expression are
++// removed because nothing in the Windows build calls them.
+ 
+ // isDefaultPath returns true if given string is a special keyword used to trigger default mount.
+ func isDefaultPath(l string) bool {
+@@ -132,30 +128,23 @@
+ }
+ 
+ // handleVolumeName handles the volume name option.
+-func handleVolumeName(opt *mountlib.Options, volumeName string) {
+-	// If volumeName parameter is set, then just set that into options replacing any existing value.
+-	// Else, ensure the volume name option is a valid network share UNC path if network mode,
+-	// and ensure network mode if configured volume name is already UNC path.
+-	if volumeName != "" {
+-		opt.VolumeName = volumeName
+-	} else if opt.VolumeName != "" { // Should always be true due to code in mountlib caller
+-		// Use value of given volume name option, but check if it is disk volume name or network volume prefix
+-		if isNetworkSharePath(opt.VolumeName) {
+-			// Specified volume name is network share UNC path, assume network mode and use it as volume prefix
+-			opt.VolumeName = opt.VolumeName[1:] // WinFsp requires volume prefix as UNC-like path but with only a single backslash
+-			if !opt.NetworkMode {
+-				// Specified volume name is network share UNC path, force network mode and use it as volume prefix
+-				fs.Debugf(nil, "Forcing network mode due to network share (UNC) volume name")
+-				opt.NetworkMode = true
+-			}
+-		} else if opt.NetworkMode {
+-			// Plain volume name treated as share name in network mode, append to hard coded "\\server" prefix to get full volume prefix.
+-			opt.VolumeName = "\\server\\" + opt.VolumeName
+-		}
+-	} else if opt.NetworkMode {
+-		// Hard coded default
+-		opt.VolumeName = "\\server\\share"
++//
++// MapFTPDrive local patch: upstream reused VolumeName as the network volume
++// prefix and, for a plain name, invented "\server\<VolumeName>". Here
++// VolumeName is only ever the volume label (see volumeLabelOptions) and the
++// prefix comes from an explicit --VolumePrefix entry in ExtraFlags or from a
++// UNC mount path (volumeName). resolveVolumePrefix in cmount_volume.go
++// documents the rules; a network mount without a valid prefix fails.
++func handleVolumeName(opt *mountlib.Options, volumeName string) error {
++	flags, network, err := resolveVolumePrefix(opt.ExtraFlags, opt.NetworkMode, volumeName)
++	if err != nil {
++		return err
+ 	}
++	if network && !opt.NetworkMode {
++		fs.Debugf(nil, "Forcing network mode because a volume prefix is set")
++	}
++	opt.ExtraFlags, opt.NetworkMode = flags, network
++	return nil
+ }
+ 
+ // getMountpoint handles mounting details on Windows,
+@@ -188,7 +177,11 @@
+ 	}
+ 
+ 	// Handle volume name
+-	handleVolumeName(opt, volumeName)
++	// MapFTPDrive local patch: an invalid volume prefix is returned like a
++	// mount point error, so mount stops before calling WinFsp.
++	if err == nil {
++		err = handleVolumeName(opt, volumeName)
++	}
+ 
+ 	// Done, return mountpoint to be used, together with updated mount options.
+ 	if opt.NetworkMode {

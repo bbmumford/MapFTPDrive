@@ -9,31 +9,21 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/rclone/rclone/cmd/mountlib"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/lib/atexit"
-	"github.com/rclone/rclone/lib/buildinfo"
 	"github.com/rclone/rclone/vfs"
 	"github.com/winfsp/cgofuse/fuse"
 )
 
-func init() {
-	name := "cmount"
-	cmountOnly := runtime.GOOS != "linux" // rclone mount only works for linux
-	if cmountOnly {
-		name = "mount"
-	}
-	cmd := mountlib.NewMountCommand(name, false, mount)
-	if cmountOnly {
-		cmd.Aliases = append(cmd.Aliases, "cmount")
-	}
-	mountlib.AddRc("cmount", mount)
-	buildinfo.Tags = append(buildinfo.Tags, "cmount")
-}
+// MapFTPDrive local patch: upstream's init registered a "mount" cobra
+// command, the "mount/*" remote-control calls and a build tag. MapFTPDrive
+// has no rclone command line or remote-control server; the engine calls
+// mount directly through mountlib.NewMountPoint, so the registration is
+// removed to keep that surface out of the process.
 
 // mountOptions configures the options from the command line flags
 func mountOptions(VFS *vfs.VFS, device string, mountpoint string, opt *mountlib.Options) (options []string) {
@@ -45,58 +35,15 @@ func mountOptions(VFS *vfs.VFS, device string, mountpoint string, opt *mountlib.
 		options = append(options, "-o", "debug")
 	}
 
-	if runtime.GOOS == "windows" {
-		options = append(options, "-o", "uid=-1")
-		options = append(options, "-o", "gid=-1")
-		options = append(options, "--FileSystemName=rclone")
-		if opt.VolumeName != "" {
-			if opt.NetworkMode {
-				options = append(options, "--VolumePrefix="+opt.VolumeName)
-			} else {
-				options = append(options, "-o", "volname="+opt.VolumeName)
-			}
-		}
-	} else {
-		options = append(options, "-o", "fsname="+device)
-		options = append(options, "-o", "subtype=rclone")
-		if runtime.GOOS != "openbsd" {
-			options = append(options, "-o", fmt.Sprintf("max_readahead=%d", opt.MaxReadAhead))
-			// This causes FUSE to supply O_TRUNC with the Open
-			// call which is more efficient for cmount.  However
-			// it does not work with cgofuse on Windows with
-			// WinFSP so cmount must work with or without it.
-			options = append(options, "-o", "atomic_o_trunc")
-		}
-		if opt.DaemonTimeout != 0 {
-			options = append(options, "-o", fmt.Sprintf("daemon_timeout=%d", int(time.Duration(opt.DaemonTimeout).Seconds())))
-		}
-		if opt.AllowOther {
-			options = append(options, "-o", "allow_other")
-		}
-		if opt.AllowRoot {
-			options = append(options, "-o", "allow_root")
-		}
-		if opt.DefaultPermissions {
-			options = append(options, "-o", "default_permissions")
-		}
-		if VFS.Opt.ReadOnly {
-			options = append(options, "-o", "ro")
-		}
-		//if opt.WritebackCache {
-		// FIXME? options = append(options, "-o", WritebackCache())
-		//}
-		if runtime.GOOS == "darwin" {
-			if opt.VolumeName != "" {
-				options = append(options, "-o", "volname="+opt.VolumeName)
-			}
-			if opt.NoAppleDouble {
-				options = append(options, "-o", "noappledouble")
-			}
-			if opt.NoAppleXattr {
-				options = append(options, "-o", "noapplexattr")
-			}
-		}
-	}
+	// MapFTPDrive local patch: only the WinFsp options remain because this
+	// file builds only for Windows. The label is VolumeName, escaped by
+	// volumeLabelOptions, for disk and network volumes alike; the network
+	// prefix is the --VolumePrefix entry that handleVolumeName validated in
+	// ExtraFlags, appended below (cmount_volume.go).
+	options = append(options, "-o", "uid=-1")
+	options = append(options, "-o", "gid=-1")
+	options = append(options, "--FileSystemName=rclone")
+	options = append(options, volumeLabelOptions(opt.VolumeName, opt.ExtraOptions)...)
 	for _, option := range opt.ExtraOptions {
 		options = append(options, "-o", option)
 	}
@@ -184,13 +131,13 @@ func mount(VFS *vfs.VFS, mountPath string, opt *mountlib.Options) (<-chan error,
 		}
 		if umountOK {
 			fs.Debugf(nil, "Unmounted successfully")
-			if runtime.GOOS == "windows" {
-				if !waitFor(func() bool {
-					_, err := os.Stat(mountpoint)
-					return err != nil
-				}) {
-					fs.Errorf(nil, "mountpoint %q didn't disappear after unmount - continuing anyway", mountpoint)
-				}
+			// MapFTPDrive local patch: the Windows-only wait runs
+			// unconditionally because this file builds only for Windows.
+			if !waitFor(func() bool {
+				_, err := os.Stat(mountpoint)
+				return err != nil
+			}) {
+				fs.Errorf(nil, "mountpoint %q didn't disappear after unmount - continuing anyway", mountpoint)
 			}
 			return nil
 		}
@@ -209,13 +156,13 @@ func mount(VFS *vfs.VFS, mountPath string, opt *mountlib.Options) (<-chan error,
 
 	// Wait for the mount point to be available on Windows
 	// On Windows the Init signal comes slightly before the mount is ready
-	if runtime.GOOS == "windows" {
-		if !waitFor(func() bool {
-			_, err := os.Stat(mountpoint)
-			return err == nil
-		}) {
-			fs.Errorf(nil, "mountpoint %q didn't became available on mount - continuing anyway", mountpoint)
-		}
+	// MapFTPDrive local patch: unconditional because this file builds only
+	// for Windows.
+	if !waitFor(func() bool {
+		_, err := os.Stat(mountpoint)
+		return err == nil
+	}) {
+		fs.Errorf(nil, "mountpoint %q didn't became available on mount - continuing anyway", mountpoint)
 	}
 
 	return errChan, unmount, mountpoint, nil
