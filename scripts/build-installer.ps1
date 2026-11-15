@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory = $true)][ValidateSet("amd64", "arm64")][string]$Architecture,
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Commit = "unknown",
-    [string]$BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"),
+    # Empty selects SOURCE_DATE_EPOCH or, failing that, the HEAD commit time,
+    # so rebuilding a commit embeds the same date.
+    [string]$BuildDate = "",
     [string]$WinFspUrl = "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi",
     [string]$WinFspSha256 = "073a70e00f77423e34bed98b86e600def93393ba5822204fac57a29324db9f7a"
 )
@@ -14,6 +16,18 @@ $build = Join-Path $repo "build"
 $output = Join-Path $repo "installer/output"
 $binary = Join-Path $build "MapFTPDrive.exe"
 $winfsp = Join-Path $build "winfsp.msi"
+. (Join-Path $PSScriptRoot "codesign.ps1")
+
+if (-not $BuildDate) {
+    $epoch = $env:SOURCE_DATE_EPOCH
+    if (-not $epoch) {
+        $epoch = & git -C $repo log -1 --format=%ct HEAD
+        if ($LASTEXITCODE -ne 0 -or -not $epoch) {
+            throw "Set SOURCE_DATE_EPOCH or -BuildDate; the HEAD commit time is unavailable"
+        }
+    }
+    $BuildDate = [DateTimeOffset]::FromUnixTimeSeconds([long]$epoch).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
+}
 
 New-Item -ItemType Directory -Force -Path $build, $output | Out-Null
 
@@ -36,12 +50,9 @@ if ($actualHash -ne $WinFspSha256.ToLowerInvariant()) {
     throw "WinFsp checksum mismatch: expected $WinFspSha256, got $actualHash"
 }
 
-$signed = [bool]($env:WINDOWS_SIGNING_PFX_BASE64 -and $env:WINDOWS_SIGNING_PASSWORD)
+$signed = Test-CodeSigningRequested
 if ($signed) {
-    $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-    [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
-    & signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WINDOWS_SIGNING_PASSWORD $binary
-    if ($LASTEXITCODE -ne 0) { throw "Executable signing failed" }
+    Invoke-CodeSigning $binary
 }
 
 $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -55,9 +66,7 @@ $installer = Get-ChildItem $output -Filter "MapFTPDrive-*-setup*.exe" | Sort-Obj
 if (-not $installer) { throw "Installer output was not created" }
 
 if ($signed) {
-    & signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WINDOWS_SIGNING_PASSWORD $installer.FullName
-    if ($LASTEXITCODE -ne 0) { throw "Installer signing failed" }
-    Remove-Item -Force $pfx
+    Invoke-CodeSigning $installer.FullName
 }
 
 Get-FileHash -Algorithm SHA256 $installer.FullName |

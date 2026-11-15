@@ -64,9 +64,14 @@ upgrade integrity. MapFTPDrive uninstall does not remove the shared WinFsp
 runtime.
 
 Release packaging builds x64 and ARM64 setup EXEs and MSIs. Authenticode
-signing is enabled only when both signing secrets are present. Unsigned
-artifacts receive `-unsigned`; signed artifacts receive no suffix. SHA-256
-files, a combined manifest, and provenance attestations accompany releases.
+signing is enabled only when both signing secrets are present, or when a
+certificate thumbprint names a certificate already in the Windows store;
+signtool selects the certificate by thumbprint, never by a password on its
+command line (see `CONTRIBUTING.md`). Unsigned artifacts receive
+`-unsigned`; signed artifacts receive no suffix. SHA-256 files, a combined
+manifest, and provenance attestations accompany releases. A release is
+published only after the CI checks and an install/uninstall smoke test of
+each architecture's MSI pass.
 
 ## Upstream source
 

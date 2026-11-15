@@ -15,9 +15,29 @@ Never place passwords, private keys, tokens, signing material, or real server
 details in source, fixtures, issues, or logs.
 
 Installer changes must preserve the all-in-one installation contract for
-both `setup.exe` and `.msi`. The pinned WinFsp URL and SHA-256 currently
-appear in both packaging scripts; update and review them together. Never
-replace the hash check with a latest-release download.
+both `setup.exe` and `.msi`. The pinned WinFsp URL and SHA-256 appear in
+both packaging scripts and in the `WINFSP_*` variables of
+`.github/workflows/ci.yml`; update and review them together. CI fails when
+they differ. Never replace the hash check with a latest-release download.
+
+`scripts/build-installer.ps1` embeds a build date taken from
+`SOURCE_DATE_EPOCH` or, when that is unset, the HEAD commit time, so
+rebuilding a commit produces the same executable. Pass `-BuildDate` only to
+override it deliberately.
+
+Packaging signs with `scripts/codesign.ps1`, which never puts a password on a
+command line. Configure one of:
+
+- `WINDOWS_SIGNING_CERT_THUMBPRINT`: the SHA-1 thumbprint of a code-signing
+  certificate already in `CurrentUser\My` or `LocalMachine\My` (for example
+  on a hardware token); or
+- `WINDOWS_SIGNING_PFX_BASE64` and `WINDOWS_SIGNING_PASSWORD` (the release
+  workflow's repository secrets): the PFX is imported into `CurrentUser\My`
+  in-process for the signing calls and removed, with its private key,
+  afterwards.
+
+signtool then selects the certificate by thumbprint. With neither set, the
+artifacts are unsigned and carry the `-unsigned` suffix.
 
 Before merging installer work, run the release workflow as a branch
 `workflow_dispatch` dry run for x64 and ARM64. Smoke-test the resulting EXE
