@@ -56,11 +56,15 @@ Before committing:
 ```text
 gofmt -w cmd internal
 go test -mod=vendor ./...
-GOOS=windows GOARCH=amd64 go test -mod=vendor ./...
-GOOS=windows GOARCH=arm64 go test -mod=vendor ./...
+GOOS=windows GOARCH=amd64 go vet -mod=vendor ./...
+GOOS=windows GOARCH=arm64 go vet -mod=vendor ./...
+GOOS=windows golangci-lint run ./...
 ```
 
-On Windows, also run `go test -race -mod=vendor ./...` where supported and
+`.golangci.yml` is the lint gate CI applies; use the golangci-lint version
+pinned in `.github/workflows/ci.yml`. On Windows, also run
+`go test -race -mod=vendor ./...` (cgo with the WinFsp Developer headers on
+`CPATH`, as CI does) and
 exercise install, upgrade, repair, uninstall, user mount, elevated mount,
 logout/login restoration, service restart restoration, credential deletion,
 and occupied-drive-letter handling.
@@ -81,17 +85,25 @@ shared WinFsp runtime installed.
   PFX and password; unsigned artifacts must be clearly identified as such.
 - Signed artifacts use the clean base filename without a suffix. Never add
   `-signed`; only unsigned artifacts use `-unsigned`.
-- Pin third-party Actions to reviewed major versions and external binary
-  downloads to both a version and SHA-256.
-- Keep the WinFsp URL and SHA-256 in `build-installer.ps1` and
-  `build-msi.ps1` synchronized. A mismatch must fail packaging.
+- Pin every Action by full commit SHA with its release in a trailing
+  comment (`uses: owner/action@<sha> # vX.Y.Z`) so Dependabot can propose
+  reviewed updates, and pin external binary downloads to both a version and
+  SHA-256.
+- Give each workflow job only the token permissions it uses. Only the
+  release publish job may hold `contents: write`, `id-token: write` and
+  `attestations: write`; the job that holds signing secrets reads only.
+- Keep the WinFsp URL and SHA-256 in `build-installer.ps1`,
+  `build-msi.ps1` and the `WINFSP_*` variables of `.github/workflows/ci.yml`
+  synchronized. A mismatch must fail packaging and CI.
 - The checked-in vendor tree is authoritative for release builds. Do not run
   an implicit dependency update during packaging.
-- Dependabot may group and rebase routine minor/patch updates. rclone is
-  intentionally excluded: update it manually only after reviewing commit
-  chronology, the extracted mount adapter, the vendor delta, and
-  `third_party/rclone/UPSTREAM.md`. A stable version number is not necessarily
-  newer than the pinned pseudo-version commit.
+- Dependabot may group and rebase routine minor/patch updates. rclone
+  updates arrive as their own grouped pull request; before merging one,
+  confirm the new commit descends from the recorded one, re-extract and
+  re-patch the mount adapter, review the vendor delta, and update
+  `third_party/rclone/UPSTREAM.md` as that file describes. If rclone is ever
+  pinned to a pseudo-version again, remember that a stable version number is
+  not necessarily newer than the pinned commit.
 - Update `CHANGELOG.md`, provenance records, screenshots, and user
   documentation before a stable release.
 

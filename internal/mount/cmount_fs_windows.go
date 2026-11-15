@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,7 +63,10 @@ found:
 
 // get the handle for fh, call with the lock held
 func (fsys *FS) _getHandle(fh uint64) (i int, handle vfs.Handle, errc int) {
-	if fh > uint64(len(fsys.handles)) {
+	// MapFTPDrive local patch: fh == len(fsys.handles) is already out of
+	// range; the upstream ">" let it reach the index below and panic inside
+	// a WinFsp callback, which terminates the whole mount host.
+	if fh >= uint64(len(fsys.handles)) {
 		fs.Debugf(nil, "Bad file handle: too big: 0x%X", fh)
 		return i, nil, -fuse.EBADF
 	}
@@ -210,13 +212,9 @@ func (fsys *FS) Readdir(dirPath string,
 
 	// We can't seek in directories and FUSE should know that so
 	// return an error if ofst is ever set.
+	// MapFTPDrive local patch: the OpenBSD-only branch is removed because
+	// this file builds only for Windows.
 	if ofst > 0 {
-		// However openbsd doesn't seem to know this - perhaps a bug in its
-		// FUSE implementation or a bug in cgofuse?
-		// See: https://github.com/billziss-gh/cgofuse/issues/49
-		if runtime.GOOS == "openbsd" {
-			return 0
-		}
 		return -fuse.ESPIPE
 	}
 
@@ -535,6 +533,10 @@ func (fsys *FS) Fsyncdir(path string, datasync bool, fh uint64) (errc int) {
 	// This is a no-op for rclone
 	return 0
 }
+
+// MapFTPDrive local patch: the macOS FSKit extended-attribute emulation
+// (shouldIgnoreAppleXattr) is removed because this file builds only for
+// Windows, where it always returned false; every xattr call reports ENOSYS.
 
 // Setxattr sets extended attributes.
 func (fsys *FS) Setxattr(path string, name string, value []byte, flags int) (errc int) {

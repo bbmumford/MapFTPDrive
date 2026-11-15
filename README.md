@@ -27,7 +27,9 @@ runtime, so a separate prerequisite download is not required.
 - `internal/explorer`: Explorer verb registration.
 - `internal/mount`: embedded rclone VFS and WinFsp host.
 - `internal/service`: per-user startup and LocalSystem service supervisors.
-- `third_party`: exact vendored upstream source and notices used by the build.
+- `third_party`: upstream provenance records, the mount adapter's local
+  patch, and a reference WinFsp source snapshot that is not built (see
+  `third_party/winfsp/UPSTREAM.md`).
 
 See `docs/architecture.md` for component and security boundaries.
 
@@ -77,7 +79,10 @@ deletes both the definition and its Credential Manager entry.
 
 ## Build
 
-Go 1.25 or newer is required. Release builds use the checked-in vendor tree:
+The build uses the Go toolchain named by the `toolchain` line in `go.mod`
+(currently Go 1.27.4); with the default `GOTOOLCHAIN=auto`, any installed Go
+1.21 or newer downloads it automatically. Release builds use the checked-in
+vendor tree:
 
 ```text
 go test -mod=vendor ./...

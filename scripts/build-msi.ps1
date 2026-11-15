@@ -13,7 +13,8 @@ $winfsp = Join-Path $repo "build/winfsp.msi"
 $output = Join-Path $repo "installer/output"
 $wxs = Join-Path $repo "installer/MapFTPDrive.wxs"
 $wixArch = if ($Architecture -eq "arm64") { "arm64" } else { "x64" }
-$signed = [bool]($env:WINDOWS_SIGNING_PFX_BASE64 -and $env:WINDOWS_SIGNING_PASSWORD)
+. (Join-Path $PSScriptRoot "codesign.ps1")
+$signed = Test-CodeSigningRequested
 $suffix = if ($signed) { "" } else { "-unsigned" }
 $msi = Join-Path $output "MapFTPDrive-$Version-windows-$wixArch$suffix.msi"
 
@@ -32,11 +33,7 @@ if ($actualHash -ne $WinFspSha256.ToLowerInvariant()) {
 if ($LASTEXITCODE -ne 0) { throw "WiX MSI build failed" }
 
 if ($signed) {
-    $pfx = Join-Path $env:RUNNER_TEMP "codesign-msi.pfx"
-    [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
-    & signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:WINDOWS_SIGNING_PASSWORD $msi
-    if ($LASTEXITCODE -ne 0) { throw "MSI signing failed" }
-    Remove-Item -Force $pfx
+    Invoke-CodeSigning $msi
 }
 
 Get-FileHash -Algorithm SHA256 $msi |

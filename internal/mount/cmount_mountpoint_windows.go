@@ -16,7 +16,6 @@ import (
 
 var isDriveRegex = regexp.MustCompile(`^[a-zA-Z]\:$`)
 var isDriveRootPathRegex = regexp.MustCompile(`^[a-zA-Z]\:\\$`)
-var isDriveOrRootPathRegex = regexp.MustCompile(`^[a-zA-Z]\:\\?$`)
 var isNetworkSharePathRegex = regexp.MustCompile(`^\\\\[^\\\?]+\\[^\\]`)
 
 // isNetworkSharePath returns true if the given string is a valid network share path,
@@ -46,11 +45,8 @@ func isDriveRootPath(l string) bool {
 	return isDriveRootPathRegex.MatchString(l)
 }
 
-// isDriveOrRootPath returns true if given string is a drive letter followed by the volume separator,
-// and optionally a path separator. See isDrive and isDriveRootPath functions.
-func isDriveOrRootPath(l string) bool {
-	return isDriveOrRootPathRegex.MatchString(l)
-}
+// MapFTPDrive local patch: isDriveOrRootPath and its regular expression are
+// removed because nothing in the Windows build calls them.
 
 // isDefaultPath returns true if given string is a special keyword used to trigger default mount.
 func isDefaultPath(l string) bool {
@@ -132,30 +128,23 @@ func handleLocalMountpath(f fs.Fs, mountpath string, opt *mountlib.Options) (str
 }
 
 // handleVolumeName handles the volume name option.
-func handleVolumeName(opt *mountlib.Options, volumeName string) {
-	// If volumeName parameter is set, then just set that into options replacing any existing value.
-	// Else, ensure the volume name option is a valid network share UNC path if network mode,
-	// and ensure network mode if configured volume name is already UNC path.
-	if volumeName != "" {
-		opt.VolumeName = volumeName
-	} else if opt.VolumeName != "" { // Should always be true due to code in mountlib caller
-		// Use value of given volume name option, but check if it is disk volume name or network volume prefix
-		if isNetworkSharePath(opt.VolumeName) {
-			// Specified volume name is network share UNC path, assume network mode and use it as volume prefix
-			opt.VolumeName = opt.VolumeName[1:] // WinFsp requires volume prefix as UNC-like path but with only a single backslash
-			if !opt.NetworkMode {
-				// Specified volume name is network share UNC path, force network mode and use it as volume prefix
-				fs.Debugf(nil, "Forcing network mode due to network share (UNC) volume name")
-				opt.NetworkMode = true
-			}
-		} else if opt.NetworkMode {
-			// Plain volume name treated as share name in network mode, append to hard coded "\\server" prefix to get full volume prefix.
-			opt.VolumeName = "\\server\\" + opt.VolumeName
-		}
-	} else if opt.NetworkMode {
-		// Hard coded default
-		opt.VolumeName = "\\server\\share"
+//
+// MapFTPDrive local patch: upstream reused VolumeName as the network volume
+// prefix and, for a plain name, invented "\server\<VolumeName>". Here
+// VolumeName is only ever the volume label (see volumeLabelOptions) and the
+// prefix comes from an explicit --VolumePrefix entry in ExtraFlags or from a
+// UNC mount path (volumeName). resolveVolumePrefix in cmount_volume.go
+// documents the rules; a network mount without a valid prefix fails.
+func handleVolumeName(opt *mountlib.Options, volumeName string) error {
+	flags, network, err := resolveVolumePrefix(opt.ExtraFlags, opt.NetworkMode, volumeName)
+	if err != nil {
+		return err
 	}
+	if network && !opt.NetworkMode {
+		fs.Debugf(nil, "Forcing network mode because a volume prefix is set")
+	}
+	opt.ExtraFlags, opt.NetworkMode = flags, network
+	return nil
 }
 
 // getMountpoint handles mounting details on Windows,
@@ -188,7 +177,11 @@ func getMountpoint(f fs.Fs, mountpath string, opt *mountlib.Options) (mountpoint
 	}
 
 	// Handle volume name
-	handleVolumeName(opt, volumeName)
+	// MapFTPDrive local patch: an invalid volume prefix is returned like a
+	// mount point error, so mount stops before calling WinFsp.
+	if err == nil {
+		err = handleVolumeName(opt, volumeName)
+	}
 
 	// Done, return mountpoint to be used, together with updated mount options.
 	if opt.NetworkMode {
