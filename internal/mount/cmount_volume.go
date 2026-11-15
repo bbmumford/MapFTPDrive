@@ -27,9 +27,10 @@ import (
 // mountlib's 32-byte cut cannot carry an endpoint-unique prefix, and a
 // prefix built from a display name collides when two drives share a name.
 
-// volumePrefixFlag is WinFsp's FUSE command-line flag for a network volume's
-// UNC prefix. It is passed as its own argument, outside the "-o" parser.
-const volumePrefixFlag = "--VolumePrefix="
+// winfspVolumePrefixFlag is WinFsp's FUSE command-line flag for a network
+// volume's UNC prefix. It is passed as its own argument, outside the "-o"
+// parser.
+const winfspVolumePrefixFlag = "--VolumePrefix="
 
 // volumePrefixMaxLength is the number of UTF-16 code units WinFsp keeps of
 // a prefix (FSP_FSCTL_VOLUME_PREFIX_SIZE less its terminator); a longer
@@ -37,7 +38,7 @@ const volumePrefixFlag = "--VolumePrefix="
 const volumePrefixMaxLength = 191
 
 // errNetworkPrefixMissing reports network mode without a volume prefix.
-var errNetworkPrefixMissing = errors.New("network mode requires a " + volumePrefixFlag + `\host\share entry in ExtraFlags; VolumeName is only the volume label`)
+var errNetworkPrefixMissing = errors.New("network mode requires a " + winfspVolumePrefixFlag + `\host\share entry in ExtraFlags; VolumeName is only the volume label`)
 
 // resolveVolumePrefix validates and normalises the network volume prefix.
 //
@@ -58,7 +59,7 @@ func resolveVolumePrefix(flags []string, networkMode bool, uncMountPath string) 
 	var found int
 	kept := make([]string, 0, len(flags)+1)
 	for _, flag := range flags {
-		if value, ok := strings.CutPrefix(flag, volumePrefixFlag); ok {
+		if value, ok := strings.CutPrefix(flag, winfspVolumePrefixFlag); ok {
 			prefix = value
 			found++
 			continue
@@ -70,7 +71,7 @@ func resolveVolumePrefix(flags []string, networkMode bool, uncMountPath string) 
 	}
 	switch {
 	case found > 1:
-		return nil, false, fmt.Errorf("%d %s entries in ExtraFlags; expected one", found, volumePrefixFlag)
+		return nil, false, fmt.Errorf("%d %s entries in ExtraFlags; expected one", found, winfspVolumePrefixFlag)
 	case found == 0 && networkMode:
 		return nil, false, errNetworkPrefixMissing
 	case found == 0:
@@ -80,7 +81,7 @@ func resolveVolumePrefix(flags []string, networkMode bool, uncMountPath string) 
 	if err != nil {
 		return nil, false, err
 	}
-	return append(kept, volumePrefixFlag+normalised), true, nil
+	return append(kept, winfspVolumePrefixFlag+normalised), true, nil
 }
 
 // normaliseVolumePrefix returns prefix in WinFsp's "\host\share" form or an

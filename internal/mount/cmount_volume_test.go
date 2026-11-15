@@ -86,7 +86,7 @@ func TestResolveVolumePrefixMissingNamesLabel(t *testing.T) {
 
 func TestResolveVolumePrefixLengthLimit(t *testing.T) {
 	prefix := `\a\` + strings.Repeat("b", volumePrefixMaxLength-3)
-	if _, _, err := resolveVolumePrefix([]string{volumePrefixFlag + prefix}, true, ""); err != nil {
+	if _, _, err := resolveVolumePrefix([]string{winfspVolumePrefixFlag + prefix}, true, ""); err != nil {
 		t.Fatalf("prefix of %d code units rejected: %v", volumePrefixMaxLength, err)
 	}
 }
