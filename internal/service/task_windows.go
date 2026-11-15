@@ -30,7 +30,7 @@ type taskHandler struct {
 }
 
 func (h taskHandler) Execute(_ []string, _ <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
-	changes <- svc.Status{State: svc.StartPending, WaitHint: uint32(taskTimeout.Milliseconds())}
+	changes <- svc.Status{State: svc.StartPending, WaitHint: uint32(taskTimeout / time.Millisecond)}
 	if err := h.task(); err != nil {
 		logError(eventTaskFailed, fmt.Sprintf("MapFTPDrive could not finish an installer task: %v", err))
 		return true, exitTaskFailed

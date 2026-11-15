@@ -183,7 +183,11 @@ func send(ctx context.Context, scope config.Scope, request Request) error {
 		return deadline
 	}
 	_ = connection.SetWriteDeadline(until(messageWriteTimeout))
-	if err := json.NewEncoder(connection).Encode(request); err != nil {
+	// The password of a new mapping travels to the host here, to be stored
+	// in Credential Manager. verifyServer has confirmed the receiving
+	// process, and the pipe's DACL admits only SYSTEM, Administrators (system
+	// pipe) or the user (user pipe), so it reaches no one else.
+	if err := json.NewEncoder(connection).Encode(request); err != nil { //nolint:gosec // G117: sent only to the verified host.
 		return err
 	}
 	decoder := json.NewDecoder(io.LimitReader(connection, 64*1024))

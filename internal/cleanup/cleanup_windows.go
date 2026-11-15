@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	// credentialFilter matches every target the credentials package writes
+	// vaultTargetFilter matches every target the credentials package writes
 	// ("MapFTPDrive/" followed by the endpoint's credential key).
-	credentialFilter = "MapFTPDrive/*"
+	vaultTargetFilter = "MapFTPDrive/*"
 	// hostStopTimeout is how long hosts get to unmount after Shutdown.
 	hostStopTimeout = 30 * time.Second
 	// userPurgeTimeout bounds each "purge-user" run in a user's session.
@@ -111,7 +111,7 @@ var (
 // deleteCredentials removes every MapFTPDrive credential of the calling
 // account, including ones whose endpoint is no longer in any store.
 func deleteCredentials() error {
-	filter, err := windows.UTF16PtrFromString(credentialFilter)
+	filter, err := windows.UTF16PtrFromString(vaultTargetFilter)
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func runInSession(session uint32, executable, argument string) error {
 	}
 	defer windows.CloseHandle(process.Process)
 	defer windows.CloseHandle(process.Thread)
-	event, err := windows.WaitForSingleObject(process.Process, uint32(userPurgeTimeout.Milliseconds()))
+	event, err := windows.WaitForSingleObject(process.Process, uint32(userPurgeTimeout/time.Millisecond))
 	if err != nil {
 		return err
 	}
@@ -281,7 +281,7 @@ func terminateHosts(pids []uint32) error {
 
 func isMapFTPDrive(process windows.Handle) bool {
 	buffer := make([]uint16, windows.MAX_LONG_PATH)
-	size := uint32(len(buffer))
+	size := uint32(windows.MAX_LONG_PATH)
 	if err := windows.QueryFullProcessImageName(process, 0, &buffer[0], &size); err != nil {
 		return false
 	}

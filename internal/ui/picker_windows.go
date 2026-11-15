@@ -4,7 +4,7 @@ package ui
 
 import (
 	"github.com/lxn/walk"
-	. "github.com/lxn/walk/declarative"
+	decl "github.com/lxn/walk/declarative"
 )
 
 func pickOne(title, prompt, action string, choices []string) (int, error) {
@@ -18,25 +18,25 @@ func pickOne(title, prompt, action string, choices []string) (int, error) {
 		selected = list.CurrentIndex()
 		dialog.Accept()
 	}
-	_, err := (Dialog{
+	_, err := (decl.Dialog{
 		AssignTo: &dialog,
 		Title:    title,
-		MinSize:  Size{Width: 380, Height: 260},
-		Layout:   VBox{},
-		Children: []Widget{
-			Label{Text: prompt},
-			ListBox{
+		MinSize:  decl.Size{Width: 380, Height: 260},
+		Layout:   decl.VBox{},
+		Children: []decl.Widget{
+			decl.Label{Text: prompt},
+			decl.ListBox{
 				AssignTo:        &list,
 				Model:           choices,
 				CurrentIndex:    0,
 				OnItemActivated: accept,
 			},
-			Composite{
-				Layout: HBox{},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{Text: "Cancel", OnClicked: func() { dialog.Cancel() }},
-					PushButton{Text: action, OnClicked: accept},
+			decl.Composite{
+				Layout: decl.HBox{},
+				Children: []decl.Widget{
+					decl.HSpacer{},
+					decl.PushButton{Text: "Cancel", OnClicked: func() { dialog.Cancel() }},
+					decl.PushButton{Text: action, OnClicked: accept},
 				},
 			},
 		},

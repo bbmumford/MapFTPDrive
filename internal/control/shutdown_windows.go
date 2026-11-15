@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -74,17 +75,27 @@ func stopUserHosts(ctx context.Context, timeout time.Duration) ([]uint32, error)
 			running = append(running, item.pid)
 			continue
 		}
-		wait := time.Until(deadline)
-		if wait < 0 {
-			wait = 0
-		}
-		event, err := windows.WaitForSingleObject(item.process, uint32(wait.Milliseconds()))
+		event, err := windows.WaitForSingleObject(item.process, waitMilliseconds(time.Until(deadline)))
 		windows.CloseHandle(item.process)
 		if err != nil || event != windows.WAIT_OBJECT_0 {
 			running = append(running, item.pid)
 		}
 	}
 	return running, errors.Join(failures...)
+}
+
+// waitMilliseconds converts d to a WaitForSingleObject timeout, clamped
+// between zero and the largest finite value (0xFFFFFFFF means INFINITE).
+func waitMilliseconds(d time.Duration) uint32 {
+	milliseconds := d.Milliseconds()
+	switch {
+	case milliseconds <= 0:
+		return 0
+	case milliseconds >= math.MaxUint32:
+		return math.MaxUint32 - 1
+	default:
+		return uint32(milliseconds)
+	}
 }
 
 // requestShutdown asks the host serving one pipe to shut down. It returns
@@ -106,7 +117,12 @@ func requestShutdown(ctx context.Context, name string) (uint32, windows.Handle, 
 		}
 	}
 	_ = connection.SetDeadline(time.Now().Add(messageWriteTimeout))
-	if err := json.NewEncoder(connection).Encode(Request{Operation: Shutdown}); err != nil {
+	// Only the operation is written: the unverified server receives no
+	// field of Request that could carry a secret.
+	shutdown := struct {
+		Operation Operation `json:"operation"`
+	}{Operation: Shutdown}
+	if err := json.NewEncoder(connection).Encode(shutdown); err != nil {
 		return pid, process, err
 	}
 	decoder := json.NewDecoder(io.LimitReader(connection, 64*1024))

@@ -6,7 +6,7 @@ import (
 )
 
 func TestDriveIndexCarriesNoConnectionDetails(t *testing.T) {
-	endpoints := []Endpoint{{
+	endpoints := []Endpoint{{ //nolint:gosec // G101: fixture values the index must not contain, not real credentials.
 		ID:            "6f1c1c3e-8f5c-4c9a-9a51-0d4c1c3e8f5c",
 		Name:          "Shared",
 		Protocol:      SFTP,

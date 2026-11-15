@@ -15,7 +15,7 @@ func DefaultPath(scope Scope) (string, error) {
 	case User:
 		base = os.Getenv("LOCALAPPDATA")
 		if base == "" {
-			return "", errors.New("Windows configuration directory is unavailable")
+			return "", errors.New("the Windows configuration directory is unavailable")
 		}
 		base = filepath.Join(base, "MapFTPDrive")
 	case System:
@@ -37,7 +37,7 @@ func DefaultPath(scope Scope) (string, error) {
 func SystemDirectory() (string, error) {
 	base := os.Getenv("ProgramData")
 	if base == "" {
-		return "", errors.New("Windows configuration directory is unavailable")
+		return "", errors.New("the Windows configuration directory is unavailable")
 	}
 	return filepath.Join(base, "MapFTPDrive"), nil
 }

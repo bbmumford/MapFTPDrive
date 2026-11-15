@@ -299,7 +299,9 @@ func ensureHost(scope config.Scope) error {
 		if err != nil {
 			return err
 		}
-		command := exec.Command(executable, "daemon", "--scope", "user")
+		// executable is this program's own path from os.Executable and the
+		// arguments are constants, so nothing caller-supplied reaches it.
+		command := exec.Command(executable, "daemon", "--scope", "user") //nolint:gosec // G204: own executable, constant arguments.
 		command.SysProcAttr = &syscall.SysProcAttr{
 			HideWindow:    true,
 			CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,

@@ -2,7 +2,7 @@ package service
 
 import "errors"
 
-var ErrWindowsOnly = errors.New("Windows service support is unavailable")
+var ErrWindowsOnly = errors.New("service support requires Windows")
 
 // ErrServiceMissing reports that the MapFTPDrive service is not installed.
 var ErrServiceMissing = errors.New("the MapFTPDrive service is not installed")
