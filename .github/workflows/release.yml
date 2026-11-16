@@ -105,61 +105,77 @@ jobs:
         with:
           name: installer-${{ matrix.arch }}
           path: dist
-      - name: Install, exercise and uninstall the MSI
+      - name: Install, exercise and uninstall the setup bundle and the MSI
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $bundle = Get-ChildItem dist -Filter "MapFTPDrive-*-bundle-setup*.exe" | Where-Object { $_.Name -notlike "*.sha256" } | Select-Object -First 1
           $msi = Get-ChildItem dist -Filter "MapFTPDrive-*.msi" | Select-Object -First 1
+          if (-not $bundle) { throw "No setup bundle in the installer artifact" }
           if (-not $msi) { throw "No MSI in the installer artifact" }
+          $exe = Join-Path $env:ProgramFiles "MapFTPDrive\MapFTPDrive.exe"
+
+          function Assert-Ok([System.Diagnostics.Process]$Process, [string]$What, [string]$Log) {
+            if ($Process.ExitCode -notin 0, 3010) {
+              if (Test-Path $Log) { Get-Content $Log -Tail 200 }
+              throw "$What exited with $($Process.ExitCode)"
+            }
+          }
+
+          # The bundle is the path a user takes: it installs WinFsp when
+          # missing, then the MSI.
+          function Invoke-Bundle([string[]]$Arguments, [string]$Log) {
+            $process = Start-Process $bundle.FullName -Wait -PassThru -ArgumentList ($Arguments + @("/quiet", "/norestart", "/log", "`"$Log`""))
+            Assert-Ok $process "Setup bundle $($Arguments -join ' ')" $Log
+          }
 
           function Invoke-Msiexec([string]$Action, [string]$Log) {
-            # 1618: another installation (the asynchronous WinFsp helper)
-            # still holds the Windows Installer mutex.
-            for ($attempt = 1; $attempt -le 36; $attempt++) {
-              $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-                $Action, "`"$($msi.FullName)`"", "/qn", "/norestart", "/l*v", "`"$Log`"")
-              if ($process.ExitCode -ne 1618) { break }
-              Start-Sleep -Seconds 5
-            }
-            if ($process.ExitCode -notin 0, 3010) {
-              Get-Content $Log -Tail 200
-              throw "msiexec $Action exited with $($process.ExitCode)"
-            }
+            $process = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+              $Action, "`"$($msi.FullName)`"", "/qn", "/norestart", "/l*v", "`"$Log`"")
+            Assert-Ok $process "msiexec $Action" $Log
           }
 
-          Invoke-Msiexec "/i" (Join-Path $env:RUNNER_TEMP "install.log")
-
-          $service = Get-CimInstance Win32_Service -Filter "Name='MapFTPDrive'"
-          if (-not $service) { throw "The MapFTPDrive service is not registered" }
-          if ($service.StartMode -ne "Auto") { throw "Service start mode is $($service.StartMode), expected Auto" }
-          if ($service.PathName -notlike "*MapFTPDrive.exe*service*") { throw "Unexpected service command: $($service.PathName)" }
-          Start-Sleep -Seconds 5
-          $state = (Get-Service MapFTPDrive).Status
-          if ($state -eq "Stopped") { throw "The MapFTPDrive service stopped after installation" }
-          Write-Output "Service registered: $($service.PathName) ($state)"
-
-          $exe = Join-Path $env:ProgramFiles "MapFTPDrive\MapFTPDrive.exe"
-          $stdout = Join-Path $env:RUNNER_TEMP "version.txt"
-          $process = Start-Process $exe -ArgumentList "version" -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout
-          $version = Get-Content $stdout -Raw
-          if ($process.ExitCode -ne 0 -or $version -notmatch '^MapFTPDrive ') {
-            throw "MapFTPDrive.exe version failed ($($process.ExitCode)): $version"
-          }
-          Write-Output $version.Trim()
-
-          # The MSI hands WinFsp to an asynchronous helper; report its state
-          # and give it time to release the installer mutex.
-          for ($i = 0; $i -lt 60 -and -not (Test-Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp"); $i++) {
+          function Assert-Installed {
+            $service = Get-CimInstance Win32_Service -Filter "Name='MapFTPDrive'"
+            if (-not $service) { throw "The MapFTPDrive service is not registered" }
+            if ($service.StartMode -ne "Auto") { throw "Service start mode is $($service.StartMode), expected Auto" }
+            if ($service.PathName -notlike "*MapFTPDrive.exe*service*") { throw "Unexpected service command: $($service.PathName)" }
             Start-Sleep -Seconds 5
+            $state = (Get-Service MapFTPDrive).Status
+            Write-Output "Service registered: $($service.PathName) ($state)"
+            $stdout = Join-Path $env:RUNNER_TEMP "version.txt"
+            $process = Start-Process $exe -ArgumentList "version" -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout
+            $version = Get-Content $stdout -Raw
+            if ($process.ExitCode -ne 0 -or $version -notmatch '^MapFTPDrive ') {
+              throw "MapFTPDrive.exe version failed ($($process.ExitCode)): $version"
+            }
+            Write-Output $version.Trim()
           }
-          $winfsp = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\WinFsp" -ErrorAction SilentlyContinue
-          Write-Output "WinFsp after install: $(if ($winfsp) { $winfsp.InstallDir } else { 'not installed' })"
 
+          function Assert-Removed {
+            if (Get-Service MapFTPDrive -ErrorAction SilentlyContinue) { throw "The service remains after uninstall" }
+            if (Test-Path $exe) { throw "$exe remains after uninstall" }
+          }
+
+          function Test-WinFsp {
+            (Test-Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp") -or (Test-Path "HKLM:\SOFTWARE\WinFsp")
+          }
+
+          Invoke-Bundle @() (Join-Path $env:RUNNER_TEMP "bundle-install.log")
+          if (-not (Test-WinFsp)) { throw "The bundle did not install WinFsp" }
+          Assert-Installed
+          Invoke-Bundle @("/uninstall") (Join-Path $env:RUNNER_TEMP "bundle-uninstall.log")
+          Assert-Removed
+          # WinFsp is shared, so the bundle leaves it installed.
+          if (-not (Test-WinFsp)) { throw "Uninstalling the bundle removed WinFsp" }
+          Write-Output "Bundle installed and removed; WinFsp kept"
+
+          # The plain MSI is for computers that already have WinFsp.
+          Invoke-Msiexec "/i" (Join-Path $env:RUNNER_TEMP "install.log")
+          Assert-Installed
           Invoke-Msiexec "/x" (Join-Path $env:RUNNER_TEMP "uninstall.log")
-
-          if (Get-Service MapFTPDrive -ErrorAction SilentlyContinue) { throw "The service remains after uninstall" }
-          if (Test-Path $exe) { throw "$exe remains after uninstall" }
-          Write-Output "Uninstalled; WinFsp present: $(Test-Path 'HKLM:\SOFTWARE\WOW6432Node\WinFsp')"
+          Assert-Removed
+          Write-Output "MSI installed and removed"
       - name: Upload installer logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
