@@ -47,10 +47,12 @@ func interactive(args []string) bool {
 }
 
 // commandLogger opens the user's log for every command except the hosts,
-// which open their own scope's log in host.Run.
+// which open their own scope's log in host.Run, and the uninstall commands,
+// which delete the user's data directory that holds the log and cannot
+// while this process keeps a log file in it open.
 func commandLogger(args []string) *logging.Logger {
 	switch commandName(args) {
-	case "service", "daemon":
+	case "service", "daemon", "uninstall", "uninstall-cleanup", "purge-user":
 		return logging.Discard()
 	}
 	path, err := config.DefaultPath(config.User)

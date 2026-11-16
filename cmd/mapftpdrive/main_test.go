@@ -47,7 +47,9 @@ func TestRunRejectsBadInput(t *testing.T) {
 	if err := run([]string{"version"}); err != nil {
 		t.Fatal(err)
 	}
-	if logger := commandLogger([]string{"service"}); logger == nil {
-		t.Fatal("no logger for the service command")
+	for _, command := range []string{"service", "purge-user"} {
+		if logger := commandLogger([]string{command}); logger == nil {
+			t.Fatalf("no logger for the %s command", command)
+		}
 	}
 }
