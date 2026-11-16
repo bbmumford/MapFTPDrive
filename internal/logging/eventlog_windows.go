@@ -4,10 +4,12 @@ package logging
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
@@ -18,20 +20,32 @@ const (
 	eventError   = 3
 )
 
+const eventSourceKey = `SYSTEM\CurrentControlSet\Services\EventLog\Application\` + EventSource
+
 // InstallEventSource registers EventSource with EventCreate.exe as its
 // message file so the service's messages render in Event Viewer. It needs
-// administrative rights; an already registered source is not an error.
+// administrative rights; an already registered source, for example one the
+// MSI wrote, is left as it is.
 func InstallEventSource() error {
-	err := eventlog.InstallAsEventCreate(EventSource, eventlog.Error|eventlog.Warning|eventlog.Info)
-	if err != nil && strings.Contains(err.Error(), "already exists") {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, eventSourceKey, registry.QUERY_VALUE)
+	if err == nil {
+		_ = key.Close()
+		return nil
+	}
+	if !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	return eventlog.InstallAsEventCreate(EventSource, eventlog.Error|eventlog.Warning|eventlog.Info)
+}
+
+// RemoveEventSource unregisters EventSource; uninstall calls it. A source
+// that is already gone is not an error.
+func RemoveEventSource() error {
+	err := eventlog.Remove(EventSource)
+	if errors.Is(err, registry.ErrNotExist) {
 		return nil
 	}
 	return err
-}
-
-// RemoveEventSource unregisters EventSource; uninstall calls it.
-func RemoveEventSource() error {
-	return eventlog.Remove(EventSource)
 }
 
 // openEventLog registers the source when missing (the service runs as
