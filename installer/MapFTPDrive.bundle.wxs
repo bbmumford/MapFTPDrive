@@ -40,7 +40,8 @@
     <!--
       Earlier WinFsp releases use another upgrade code, and the bundled MSI
       refuses to install over them. Stop before changing anything and tell
-      the user what to remove.
+      the user what to remove. A search that finds no product sets its
+      version variable to 0.0.0.0, which a condition reads as set.
     -->
     <util:ProductSearch
         Id="FindOlderWinFsp"
@@ -49,7 +50,7 @@
         Variable="WinFspOlderVersion" />
     <bal:Condition
         Message="An older WinFsp release that cannot be upgraded automatically is installed. Uninstall WinFsp from Settings, Apps, then run this setup again."
-        Condition="NOT WinFspOlderVersion" />
+        Condition="NOT WinFspOlderVersion OR WinFspOlderVersion = v0.0.0.0" />
 
     <Chain>
       <!--
