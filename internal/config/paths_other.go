@@ -29,5 +29,3 @@ func VerifySystemDirectory() error     { return errSystemScope }
 func isSystemStore(string) bool { return false }
 
 func ensureStoreDirectory(dir string) error { return os.MkdirAll(dir, 0o700) }
-
-func writeDriveIndexFile(string, []byte) error { return errSystemScope }

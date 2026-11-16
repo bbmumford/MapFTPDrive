@@ -34,12 +34,8 @@ func (handler) Execute(_ []string, requests <-chan svc.ChangeRequest, changes ch
 				"Repair or reinstall MapFTPDrive to restore the directory's permissions.", err))
 		return true, exitInsecureDataPath
 	}
-	if path, err := config.DefaultPath(config.System); err == nil {
-		if err := config.NewStore(path).RefreshDriveIndex(); err != nil {
-			logWarning(eventDriveIndexFailed, fmt.Sprintf(
-				"MapFTPDrive could not update its drive index, so Explorer commands may not recognise system drives: %v", err))
-		}
-	}
+	// host.Run refreshes the drive index once it owns the control pipe and
+	// reports a failure to the Event Log.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)

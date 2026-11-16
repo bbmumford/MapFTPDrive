@@ -11,8 +11,7 @@ import (
 
 // Event IDs written to the Application log under the MapFTPDrive source.
 const (
-	eventStartRefused     = 1
-	eventDriveIndexFailed = 2
+	eventStartRefused = 1
 )
 
 const eventSourceKey = `SYSTEM\CurrentControlSet\Services\EventLog\Application\` + Name
@@ -43,13 +42,6 @@ func removeEventSource() error {
 func logError(id uint32, message string) {
 	if log, err := eventlog.Open(Name); err == nil {
 		_ = log.Error(id, message)
-		_ = log.Close()
-	}
-}
-
-func logWarning(id uint32, message string) {
-	if log, err := eventlog.Open(Name); err == nil {
-		_ = log.Warning(id, message)
 		_ = log.Close()
 	}
 }

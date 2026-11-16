@@ -27,6 +27,13 @@ const (
 	// clientIdleTimeout is how long a client waits between host messages;
 	// the host sends one every ProgressInterval while it works.
 	clientIdleTimeout = 3 * ProgressInterval
+	// maxRequestSize bounds a request, which holds at most one endpoint
+	// definition and its secret.
+	maxRequestSize = 128 * 1024
+	// maxResponseSize bounds everything a client reads in one exchange: the
+	// interim messages and a final response that may be a status report
+	// listing every drive of the scope with its full definition.
+	maxResponseSize = 1 << 20
 )
 
 func currentSID() (string, error) {
@@ -75,7 +82,7 @@ func pipeSecurity(scope config.Scope) (string, error) {
 	return "D:P(A;;GA;;;SY)(A;;GA;;;" + sid + ")", nil
 }
 
-func serve(ctx context.Context, scope config.Scope, handler Handler) error {
+func serve(ctx context.Context, scope config.Scope, handler Handler, ready func()) error {
 	name, err := pipeName(scope)
 	if err != nil {
 		return err
@@ -99,6 +106,9 @@ func serve(ctx context.Context, scope config.Scope, handler Handler) error {
 		<-serveCtx.Done()
 		listener.Close()
 	}()
+	if ready != nil {
+		ready()
+	}
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -111,6 +121,12 @@ func serve(ctx context.Context, scope config.Scope, handler Handler) error {
 	}
 }
 
+// handleConnection reads one request and answers it. A Shutdown request is
+// answered here and stops Serve; any other request is acknowledged with
+// StatusAccepted, reported with StatusWorking every ProgressInterval while
+// the handler runs, and ended with the handler's Response marked
+// StatusDone. The handler's context ends after RequestTimeout, the same
+// budget the client waits for.
 func handleConnection(ctx context.Context, connection net.Conn, handler Handler, shutdown context.CancelFunc) {
 	defer connection.Close()
 	encoder := json.NewEncoder(connection)
@@ -120,8 +136,8 @@ func handleConnection(ctx context.Context, connection net.Conn, handler Handler,
 	}
 	_ = connection.SetReadDeadline(time.Now().Add(requestReadTimeout))
 	var request Request
-	if err := json.NewDecoder(io.LimitReader(connection, 128*1024)).Decode(&request); err != nil {
-		_ = write(Response{Error: "invalid request"})
+	if err := json.NewDecoder(io.LimitReader(connection, maxRequestSize)).Decode(&request); err != nil {
+		_ = write(Response{Status: StatusDone, Error: "invalid request"})
 		return
 	}
 	if request.Operation == Shutdown {
@@ -134,16 +150,24 @@ func handleConnection(ctx context.Context, connection net.Conn, handler Handler,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, RequestTimeout)
 	defer cancel()
-	result := make(chan error, 1)
-	go func() { result <- handler(requestCtx, request) }()
+	type outcome struct {
+		response Response
+		err      error
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		response, err := handler(requestCtx, request)
+		result <- outcome{response: response, err: err}
+	}()
 	ticker := time.NewTicker(ProgressInterval)
 	defer ticker.Stop()
 	for {
 		select {
-		case err := <-result:
-			response := Response{Status: StatusDone}
-			if err != nil {
-				response = Response{Error: err.Error()}
+		case done := <-result:
+			response := done.response
+			response.Status = StatusDone
+			if done.err != nil {
+				response.Error = done.err.Error()
 			}
 			_ = write(response)
 			return
@@ -154,26 +178,31 @@ func handleConnection(ctx context.Context, connection net.Conn, handler Handler,
 				return
 			}
 		case <-requestCtx.Done():
-			_ = write(Response{Error: fmt.Sprintf("the request did not finish within %s", RequestTimeout)})
+			_ = write(Response{Status: StatusDone, Error: fmt.Sprintf("the request did not finish within %s", RequestTimeout)})
 			return
 		}
 	}
 }
 
-func send(ctx context.Context, scope config.Scope, request Request) error {
+// send verifies the pipe server, writes request and reads host messages
+// until the final one. Each read waits at most clientIdleTimeout, which the
+// host's progress messages keep from expiring while it works, and never past
+// ctx's deadline. A final message with Error set is returned together with
+// an error built from it.
+func send(ctx context.Context, scope config.Scope, request Request) (Response, error) {
 	name, err := pipeName(scope)
 	if err != nil {
-		return err
+		return Response{}, err
 	}
 	connection, err := winio.DialPipeContext(ctx, name)
 	if err != nil {
-		return err
+		return Response{}, err
 	}
 	defer connection.Close()
 	stop := context.AfterFunc(ctx, func() { connection.Close() })
 	defer stop()
 	if err := verifyServer(connection, scope); err != nil {
-		return err
+		return Response{}, err
 	}
 	until := func(limit time.Duration) time.Time {
 		deadline := time.Now().Add(limit)
@@ -188,29 +217,29 @@ func send(ctx context.Context, scope config.Scope, request Request) error {
 	// process, and the pipe's DACL admits only SYSTEM, Administrators (system
 	// pipe) or the user (user pipe), so it reaches no one else.
 	if err := json.NewEncoder(connection).Encode(request); err != nil { //nolint:gosec // G117: sent only to the verified host.
-		return err
+		return Response{}, err
 	}
-	decoder := json.NewDecoder(io.LimitReader(connection, 64*1024))
+	decoder := json.NewDecoder(io.LimitReader(connection, maxResponseSize))
 	for {
 		_ = connection.SetReadDeadline(until(clientIdleTimeout))
 		var response Response
 		if err := decoder.Decode(&response); err != nil {
 			if ctx.Err() != nil {
-				return fmt.Errorf("the MapFTPDrive host did not finish in time: %w", ctx.Err())
+				return Response{}, fmt.Errorf("the MapFTPDrive host did not finish in time: %w", ctx.Err())
 			}
 			var netErr net.Error
 			if errors.As(err, &netErr) && netErr.Timeout() {
-				return errors.New("the MapFTPDrive host stopped responding")
+				return Response{}, errors.New("the MapFTPDrive host stopped responding")
 			}
-			return fmt.Errorf("read the MapFTPDrive host response: %w", err)
+			return Response{}, fmt.Errorf("read the MapFTPDrive host response: %w", err)
 		}
 		if !response.Final() {
 			continue
 		}
 		if response.Error != "" {
-			return fmt.Errorf("MapFTPDrive host: %s", response.Error)
+			return response, fmt.Errorf("MapFTPDrive host: %s", response.Error)
 		}
-		return nil
+		return response, nil
 	}
 }
 

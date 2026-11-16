@@ -13,9 +13,13 @@ runtime, so a separate prerequisite download is not required.
 - Shift-right-click **This PC** and choose **Map FTP Drive (system-wide)**.
   Windows requests elevation and installs the mount under a LocalSystem
   service, making it available to all users.
-- Right-click a managed drive and choose **Unmount FTP Drive** or
-  **Remove FTP Drive**. Unmount keeps its definition; remove deletes it and
-  its stored credential.
+- Right-click a managed drive and choose **Unmount FTP Drive**,
+  **Rename FTP Drive** or **Remove FTP Drive**. Unmount keeps its
+  definition; remove deletes it, its stored credential, its pinned server
+  identity and its local cache.
+- Open **Manage FTP Drives** from the Start menu (or run
+  `mapftpdrive.exe manage`) to see every drive with its live status and to
+  map, mount, unmount, edit, rename, remove, test or re-pin it.
 - Secrets are held in Windows Credential Manager, never in the JSON endpoint
   store or command-line arguments.
 
@@ -35,16 +39,40 @@ See `docs/architecture.md` for component and security boundaries.
 
 ## Features
 
-- FTP, explicit FTPS, implicit FTPS, and SFTP endpoints.
-- Native Windows mapping dialog with automatic free-drive selection.
-- SFTP trust-on-first-use prompt with a pinned SHA-256 host key.
-- Credentials stored in Windows Credential Manager.
+- FTP, explicit FTPS, implicit FTPS, and SFTP endpoints, with the
+  protocol's default port filled in (22 SFTP, 21 FTP and explicit FTPS,
+  990 implicit FTPS).
+- SFTP password or private-key login; the password or key passphrase is
+  kept in Windows Credential Manager and the key file is copied into
+  MapFTPDrive's own folder.
+- Native mapping dialog that offers only free drive letters and refuses a
+  letter already used on this computer or by another MapFTPDrive drive in
+  either scope.
+- A drive is saved only after a test connection and mount succeed, so a
+  failed mapping never leaves a hidden definition holding the letter.
+  Mapping onto the letter of an unmounted drive re-uses or replaces it.
+- SFTP host keys are pinned on first use after the SHA-256 fingerprint is
+  shown; an SFTP drive is never mounted without a pinned key. FTPS
+  certificates that Windows does not trust can be pinned the same way.
+  A changed host key or certificate stops the drive and shows the pinned
+  and presented fingerprints before an explicit re-pin.
+- Drives reconnect on their own: failed or dropped mounts are retried
+  with increasing delays (about 5 s up to 5 min) and immediately when the
+  network changes; the hosts wait for the network at boot and sign-in.
+- Files written through a drive are cached locally first, so Office-style
+  saves, random writes and upload retries work. Directory listings are
+  cached for a minute, and network timeouts keep Explorer from hanging
+  for long while a server is offline.
 - Persistent per-user mounts restored at sign-in.
 - UAC-protected system-wide mounts restored by a LocalSystem service.
 - Explorer actions for map, mount, unmount, rename, and remove.
-- Explorer's ordinary Rename action is monitored and persisted for user
-  drives. System-wide network volumes use **Rename FTP Drive** and a
-  controlled remount.
+- Renaming uses **Rename FTP Drive** or the management window for every
+  drive. WinFsp volumes do not accept Explorer's own Rename, so
+  MapFTPDrive saves the new name and remounts the drive with it. Drive
+  names are at most 32 characters and cannot contain `\`, `/` or commas.
+- Logs: `%LOCALAPPDATA%\MapFTPDrive\logs` for your drives and the
+  protected `%ProgramData%\MapFTPDrive\logs` plus the Windows Event Log
+  (source MapFTPDrive) for system-wide drives.
 - Reproducible vendored Go dependencies and auditable upstream provenance.
 
 ## Use
@@ -66,11 +94,15 @@ MapFTPDrive system service are machine-wide components.
 
 After installation:
 
-1. Right-click **This PC** and select **Map FTP Drive**.
-2. Enter the server, protocol, port, username, password, remote path, drive
-   label, and drive letter.
-3. For SFTP, verify the displayed host-key fingerprint.
-4. Use a managed drive's context menu to unmount, rename, or remove it.
+1. Right-click **This PC** and select **Map FTP Drive**, or choose
+   **Map new drive** in **Manage FTP Drives**.
+2. Enter the drive name, protocol, server, port, username, password (or
+   private key and passphrase for SFTP), remote path, and drive letter.
+3. For SFTP, and for FTPS servers whose certificate Windows does not
+   trust, compare the displayed SHA-256 fingerprint with one from the
+   server's administrator before trusting it.
+4. Use a managed drive's context menu or the management window to
+   unmount, rename, or remove it.
 
 Hold Shift while right-clicking **This PC** to reveal
 **Map FTP Drive (system-wide)**. Windows requests UAC approval before the
@@ -82,11 +114,13 @@ administrator entered (the password itself stays hidden in the service's
 Credential Manager). Map a per-user drive unless every local user may have
 that access; see `SECURITY.md`.
 
-Unmount retains a disabled definition. Right-click **This PC** and choose
-**Mount FTP Drive** to mount it again. Remove deletes both the definition
-and its Credential Manager entry. The drive commands appear only on
-MapFTPDrive drives; see `docs/architecture.md` for how Explorer recognises
-them.
+Unmount retains a disabled definition. To mount it again, right-click
+**This PC** and choose **Mount FTP Drive**, choose **Mount** in **Manage
+FTP Drives**, or map the same server to the same letter. Remove deletes the
+definition, its Credential Manager entry, its pinned host key, its copied
+private key and its local cache; changes still waiting in the cache to be
+uploaded are lost. The drive commands appear only on MapFTPDrive drives;
+see `docs/architecture.md` for how Explorer recognises them.
 
 ## Uninstall
 
@@ -96,9 +130,10 @@ unmount) and the system service. Unless you keep the data, it also removes:
 - the `MapFTPDrive/...` entries in Credential Manager of every user signed
   in at that moment, and of the system service;
 - each user's `%LOCALAPPDATA%\MapFTPDrive` (drive definitions, SFTP host
-  keys, logs and caches), for every profile on the computer;
-- `%ProgramData%\MapFTPDrive` (system drive definitions, host keys, the drive
-  index and logs).
+  keys, copied private keys, logs and caches), for every profile on the
+  computer;
+- `%ProgramData%\MapFTPDrive` (system drive definitions, host keys, copied
+  private keys, the drive index, logs and caches).
 
 How to keep the data for a later reinstall:
 

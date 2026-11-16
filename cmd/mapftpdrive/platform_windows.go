@@ -14,59 +14,14 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
-	"mapftpdrive/internal/app"
 	"mapftpdrive/internal/cleanup"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/control"
 	"mapftpdrive/internal/explorer"
 	"mapftpdrive/internal/host"
-	"mapftpdrive/internal/security"
 	"mapftpdrive/internal/service"
 	"mapftpdrive/internal/ui"
 )
-
-func launchUI(scope config.Scope) error {
-	if scope == config.System && !windows.GetCurrentProcessToken().IsElevated() {
-		return relaunchElevated("map", "--scope", "system")
-	}
-	result, err := ui.ShowMapper(scope)
-	if errors.Is(err, ui.ErrCancelled) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	id, err := app.NewID()
-	if err != nil {
-		return err
-	}
-	result.Endpoint.ID = id
-	result.Endpoint.CredentialKey = "endpoint/" + id
-	if result.Endpoint.Protocol == config.SFTP {
-		key, scanErr := security.ScanSFTPHostKey(result.Endpoint)
-		if scanErr != nil {
-			return fmt.Errorf("unable to verify the SFTP server: %w", scanErr)
-		}
-		if !ui.ConfirmHostKey(result.Endpoint.Host, key.Algorithm, key.Fingerprint) {
-			return nil
-		}
-		result.Endpoint.KnownHost = key.Line
-	}
-	if err := ensureHost(scope); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), control.RequestTimeout)
-	defer cancel()
-	err = control.Send(ctx, scope, control.Request{
-		Operation: control.SaveAndMount,
-		Endpoint:  &result.Endpoint,
-		Password:  result.Password,
-	})
-	if err != nil {
-		return fmt.Errorf("unable to map the drive: %w", err)
-	}
-	return nil
-}
 
 // installMachine is the EXE installer's post-copy step, run elevated. The
 // installer itself writes the machine-wide Explorer verbs and Run entry;
@@ -255,7 +210,7 @@ func systemDrives() []config.Endpoint {
 			}
 		}
 	}
-	indexed, err := config.ReadDriveIndex()
+	indexed, err := config.ReadSystemDriveIndex()
 	if err != nil {
 		return nil
 	}
@@ -279,17 +234,25 @@ func findManagedDrive(drive string) (config.Scope, config.Endpoint, error) {
 	return "", config.Endpoint{}, fmt.Errorf("drive %s: is not managed by MapFTPDrive", drive)
 }
 
+// ensureHost returns once the scope's host answers on its pipe, starting
+// the host when nothing answers. A host takes its pipe before it mounts
+// anything, so an answer means it is ready for requests, however long its
+// mounts take. A host started while another already owns the pipe exits
+// cleanly, so starting one more than needed is harmless; a started user
+// host that exits with an error ends the wait with that error instead of
+// waiting out the deadline. A pipe served by a process that fails the
+// identity check (control.ErrUntrustedHost) ends the wait at once: that
+// process holds the pipe name, so a new host could not take it.
 func ensureHost(scope config.Scope) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
-	err := control.Send(ctx, scope, control.Request{Operation: control.Ping})
-	cancel()
-	if err == nil {
-		return nil
+	ping := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return control.Send(ctx, scope, control.Request{Operation: control.Ping})
 	}
-	// Another process holds the pipe name; a new host could not take it.
-	if errors.Is(err, control.ErrUntrustedHost) {
+	if err := ping(); err == nil || errors.Is(err, control.ErrUntrustedHost) {
 		return err
 	}
+	var exited chan error
 	if scope == config.System {
 		if err := service.EnsureStarted(); err != nil {
 			return err
@@ -309,19 +272,33 @@ func ensureHost(scope config.Scope) error {
 		if err := command.Start(); err != nil {
 			return err
 		}
-		_ = command.Process.Release()
+		exited = make(chan error, 1)
+		go func() { exited <- command.Wait() }()
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err := control.Send(ctx, scope, control.Request{Operation: control.Ping})
-		cancel()
+	const readyWithin = 60 * time.Second
+	deadline := time.Now().Add(readyWithin)
+	delay := 50 * time.Millisecond
+	for {
+		err := ping()
 		if err == nil || errors.Is(err, control.ErrUntrustedHost) {
 			return err
 		}
-		time.Sleep(200 * time.Millisecond)
+		select {
+		case exitErr := <-exited:
+			exited = nil
+			if exitErr != nil {
+				return fmt.Errorf("the MapFTPDrive host exited (%w); see mapftpdrive.log in %%LOCALAPPDATA%%\\MapFTPDrive\\logs", exitErr)
+			}
+		default:
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the MapFTPDrive host did not answer within %s: %w", readyWithin, err)
+		}
+		time.Sleep(delay)
+		if delay < time.Second {
+			delay *= 2
+		}
 	}
-	return errors.New("mount host did not become ready")
 }
 
 // relaunchElevated starts this executable with arguments through the UAC
@@ -364,10 +341,11 @@ func elevatedCommandLine(arguments []string) string {
 
 // reportError writes err to stderr and, for commands started from Explorer
 // or the Start menu, also shows it in a message box because a GUI-subsystem
-// process has no console there.
+// process has no console there. An error the command already showed itself
+// (ui.WasShown) is not shown a second time.
 func reportError(err error, interactive bool) {
 	fmt.Fprintln(os.Stderr, "MapFTPDrive:", err)
-	if interactive {
+	if interactive && !ui.WasShown(err) {
 		ui.ShowError("MapFTPDrive", err)
 	}
 }

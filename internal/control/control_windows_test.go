@@ -32,30 +32,37 @@ func startServer(t *testing.T, scope config.Scope, handler Handler) {
 }
 
 func TestUserPipeRoundTrip(t *testing.T) {
-	startServer(t, config.User, func(_ context.Context, request Request) error {
+	startServer(t, config.User, func(_ context.Context, request Request) (Response, error) {
 		if request.Operation == Remove {
-			return errors.New("refused")
+			return Response{Message: "kept"}, errors.New("refused")
 		}
-		return nil
+		return Response{Message: "pong"}, nil
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := Send(ctx, config.User, Request{Operation: Ping}); err != nil {
+	response, err := Call(ctx, config.User, Request{Operation: Ping})
+	if err != nil {
 		t.Fatalf("ping: %v", err)
 	}
-	err := Send(ctx, config.User, Request{Operation: Remove, Drive: "X"})
+	if response.Status != StatusDone || response.Message != "pong" {
+		t.Fatalf("ping response %+v", response)
+	}
+	response, err = Call(ctx, config.User, Request{Operation: Remove, Drive: "X"})
 	if err == nil || !strings.Contains(err.Error(), "refused") {
 		t.Fatalf("remove returned %v", err)
+	}
+	if response.Error != "refused" || response.Message != "kept" {
+		t.Fatalf("remove response %+v", response)
 	}
 }
 
 func TestUserPipeReportsProgressForSlowRequests(t *testing.T) {
-	startServer(t, config.User, func(ctx context.Context, _ Request) error {
+	startServer(t, config.User, func(ctx context.Context, _ Request) (Response, error) {
 		select {
 		case <-time.After(ProgressInterval + time.Second):
-			return nil
+			return Response{}, nil
 		case <-ctx.Done():
-			return ctx.Err()
+			return Response{}, ctx.Err()
 		}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -70,9 +77,9 @@ func TestShutdownMakesServeReturn(t *testing.T) {
 	defer cancel()
 	served := make(chan error, 1)
 	go func() {
-		served <- Serve(ctx, config.User, func(context.Context, Request) error {
+		served <- Serve(ctx, config.User, func(context.Context, Request) (Response, error) {
 			t.Error("the handler received the shutdown request")
-			return nil
+			return Response{}, nil
 		})
 	}()
 	select {
@@ -105,9 +112,9 @@ func TestSystemPipeServedByAnotherAccountIsRefused(t *testing.T) {
 	}
 	// This process plays a process that created the system pipe name
 	// before the service did.
-	startServer(t, config.System, func(context.Context, Request) error {
+	startServer(t, config.System, func(context.Context, Request) (Response, error) {
 		t.Error("the squatting server received a request")
-		return nil
+		return Response{}, nil
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

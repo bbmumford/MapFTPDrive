@@ -4,16 +4,13 @@ package ui
 
 import (
 	"errors"
-
-	"mapftpdrive/internal/config"
 )
 
-func showMapper(config.Scope) (MapperResult, error) {
-	return MapperResult{}, errors.New("the native mapper is only available on Windows")
-}
-func confirmRemove(string, string) bool { return false }
-func promptRename(string) (string, error) {
-	return "", errors.New("the native mapper is only available on Windows")
-}
-func confirmHostKey(string, string, string) bool { return false }
-func showError(string, error)                    {}
+var errNoWindows = errors.New("the native interface is only available on Windows")
+
+func showMapper(MapperOptions) (MapperResult, error) { return MapperResult{}, errNoWindows }
+func showManager(ManagerOptions) error               { return errNoWindows }
+func confirmRemove(string, string) bool              { return false }
+func promptRename(string) (string, error)            { return "", errNoWindows }
+func confirmHostKey(string, string, string) bool     { return false }
+func showError(string, error)                        {}

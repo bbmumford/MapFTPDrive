@@ -3,41 +3,76 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"mapftpdrive/internal/buildinfo"
 	"mapftpdrive/internal/cleanup"
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/explorer"
+	"mapftpdrive/internal/logging"
 	"mapftpdrive/internal/service"
 )
 
 func main() {
 	args := os.Args[1:]
+	logger := commandLogger(args)
 	if err := run(args); err != nil {
-		reportError(err, interactiveCommand(args))
+		logger.Error("command failed", "command", commandName(args), "error", err)
+		reportError(err, interactive(args))
 		os.Exit(1)
 	}
 }
 
-// interactiveCommand reports whether args name a command that Explorer or
-// the Start menu starts. The executable uses the GUI subsystem, so those
-// invocations have no console and reportError must show a message box;
-// installer and service commands keep failing silently with an exit code.
-func interactiveCommand(args []string) bool {
+func commandName(args []string) string {
 	if len(args) == 0 {
-		return true
+		return "manage"
 	}
-	switch args[0] {
-	case "map", "mount", "unmount", "remove", "rename":
-		return true
+	return args[0]
+}
+
+// interactive reports commands started by a person (Start menu, Explorer
+// verbs) as opposed to installers, the service manager or the sign-in Run
+// entry, which must never block on a message box. The executable uses the
+// GUI subsystem, so an interactive command has no console and reportError
+// also shows its failure in a message box; the others fail with an exit
+// code only.
+func interactive(args []string) bool {
+	switch commandName(args) {
+	case "install", "prepare-system-data", "configure-service", "uninstall", "uninstall-cleanup",
+		"purge-user", "service", "daemon", "version":
+		return false
 	}
-	return false
+	return true
+}
+
+// commandLogger opens the user's log for every command except the hosts,
+// which open their own scope's log in host.Run.
+func commandLogger(args []string) *logging.Logger {
+	switch commandName(args) {
+	case "service", "daemon":
+		return logging.Discard()
+	}
+	path, err := config.DefaultPath(config.User)
+	if err != nil {
+		return logging.Discard()
+	}
+	logger, _ := logging.Open(logging.Options{Dir: config.LayoutFor(path).LogDir()})
+	slog.SetDefault(logger.Logger)
+	return logger
+}
+
+func parseScope(value string) (config.Scope, error) {
+	scope := config.Scope(value)
+	if scope != config.User && scope != config.System {
+		return "", fmt.Errorf("--scope must be %q or %q", config.User, config.System)
+	}
+	return scope, nil
 }
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return launchUI(config.User)
+		return runManager()
 	}
 	switch args[0] {
 	case "map":
@@ -46,7 +81,13 @@ func run(args []string) error {
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		return launchUI(config.Scope(*scope))
+		parsed, err := parseScope(*scope)
+		if err != nil {
+			return err
+		}
+		return runMapper(parsed)
+	case "manage":
+		return runManager()
 	case "install":
 		return installMachine()
 	case "prepare-system-data":
