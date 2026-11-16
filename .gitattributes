@@ -1,0 +1,5 @@
+# Go sources stay LF on every checkout: gofmt, and so the Windows lint job,
+# rejects the CRLF a Windows checkout would otherwise give them.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
