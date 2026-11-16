@@ -61,8 +61,8 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\MapFTPDrive"; Filename: "{app}\MapFTPDrive.exe"
-Name: "{autodesktop}\MapFTPDrive"; Filename: "{app}\MapFTPDrive.exe"; Tasks: desktopicon
+Name: "{group}\MapFTPDrive"; Filename: "{app}\MapFTPDrive.exe"; Parameters: "manage"; Comment: "Manage FTP Drives"
+Name: "{autodesktop}\MapFTPDrive"; Filename: "{app}\MapFTPDrive.exe"; Parameters: "manage"; Comment: "Manage FTP Drives"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"

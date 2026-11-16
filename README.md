@@ -17,9 +17,10 @@ runtime, so a separate prerequisite download is not required.
   **Rename FTP Drive** or **Remove FTP Drive**. Unmount keeps its
   definition; remove deletes it, its stored credential, its pinned server
   identity and its local cache.
-- Open **Manage FTP Drives** from the Start menu (or run
-  `mapftpdrive.exe manage`) to see every drive with its live status and to
-  map, mount, unmount, edit, rename, remove, test or re-pin it.
+- Open **MapFTPDrive** from the Start menu (or run
+  `mapftpdrive.exe manage`) for the **Manage FTP Drives** window, which
+  shows every drive with its live status and maps, mounts, unmounts, edits,
+  renames, removes, tests or re-pins it.
 - Secrets are held in Windows Credential Manager, never in the JSON endpoint
   store or command-line arguments.
 

@@ -74,7 +74,9 @@
           <Shortcut
               Id="ApplicationStartMenuShortcut"
               Name="MapFTPDrive"
+              Description="Manage FTP Drives"
               Target="[INSTALLFOLDER]MapFTPDrive.exe"
+              Arguments="manage"
               WorkingDirectory="INSTALLFOLDER" />
           <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
           <RegistryValue
