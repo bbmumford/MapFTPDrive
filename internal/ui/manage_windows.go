@@ -15,10 +15,11 @@ import (
 	"mapftpdrive/internal/control"
 )
 
-// actionTimeout bounds one request from the window; it exceeds the host's
-// own per-request budget so the host's answer, not a client timeout, is
-// what the user sees.
-const actionTimeout = 45 * time.Second
+// actionTimeout bounds one request from the window. It is the host's own
+// control.RequestTimeout, within which the host answers (reporting progress
+// meanwhile), so the host's answer, not a client timeout, is what the user
+// sees.
+const actionTimeout = control.RequestTimeout
 
 type rowModel struct {
 	walk.TableModelBase
@@ -322,7 +323,7 @@ func (m *manager) openDialog(scope config.Scope, host Host, initial *config.Endp
 		Initial: initial,
 		Usage:   m.usage(),
 		Submit: func(result MapperResult, prompter Prompter) error {
-			ctx, cancel := context.WithTimeout(context.Background(), actionTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), SubmitTimeout)
 			defer cancel()
 			_, err := SubmitMap(ctx, host, m.options.Scanner, prompter, result, initial)
 			return err

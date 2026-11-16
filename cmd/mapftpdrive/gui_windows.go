@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -14,10 +13,6 @@ import (
 	"mapftpdrive/internal/control"
 	"mapftpdrive/internal/ui"
 )
-
-// submitTimeout bounds a map or edit submission: identity scan, host
-// start-up and the host's own bounded test-mount-save.
-const submitTimeout = 90 * time.Second
 
 // scopeHost is a ui.Host for one scope. It makes sure the host runs before
 // the first request and again after a request fails, so a host that was
@@ -92,7 +87,7 @@ func runMapper(scope config.Scope) error {
 		Scope: scope,
 		Usage: letterUsage(),
 		Submit: func(result ui.MapperResult, prompter ui.Prompter) error {
-			ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), ui.SubmitTimeout)
 			defer cancel()
 			_, err := ui.SubmitMap(ctx, host, ui.NetworkScanner, prompter, result, nil)
 			return err

@@ -13,6 +13,11 @@ import (
 	"mapftpdrive/internal/security"
 )
 
+// SubmitTimeout bounds a map or edit submission (SubmitMap): up to a
+// minute for the server identity scan and the user's answer to the trust
+// prompt, then the host exchange with its full control.RequestTimeout.
+const SubmitTimeout = time.Minute + control.RequestTimeout
+
 // Host sends requests to one scope's mount host, starting it if needed.
 type Host interface {
 	Call(context.Context, control.Request) (control.Response, error)
