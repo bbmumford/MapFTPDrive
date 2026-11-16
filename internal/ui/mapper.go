@@ -60,6 +60,9 @@ func ConfirmHostKey(host, algorithm, fingerprint string) bool {
 var (
 	shownMu   sync.Mutex
 	lastShown string
+	// showError puts an error in front of the user; tests replace it, since
+	// a message box waits for a click no test runner gives.
+	showError = showErrorBox
 )
 
 // ShowError shows err in a message box and remembers it, so the command

@@ -312,6 +312,6 @@ func runRenameDialog(owner walk.Form, current string) (string, error) {
 	return name, nil
 }
 
-func showError(title string, err error) {
+func showErrorBox(title string, err error) {
 	walk.MsgBox(nil, title, err.Error(), walk.MsgBoxIconError)
 }

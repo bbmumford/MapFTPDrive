@@ -13,4 +13,4 @@ func showManager(ManagerOptions) error               { return errNoWindows }
 func confirmRemove(string, string) bool              { return false }
 func promptRename(string) (string, error)            { return "", errNoWindows }
 func confirmHostKey(string, string, string) bool     { return false }
-func showError(string, error)                        {}
+func showErrorBox(string, error)                     {}

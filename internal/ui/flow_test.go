@@ -455,6 +455,9 @@ func TestPromptTextsShowFingerprints(t *testing.T) {
 }
 
 func TestShownErrorsAreRemembered(t *testing.T) {
+	previous := showError
+	showError = func(string, error) {}
+	t.Cleanup(func() { showError = previous })
 	err := errors.New("drive Z: is not managed")
 	if WasShown(err) {
 		t.Fatal("unshown error reported as shown")
