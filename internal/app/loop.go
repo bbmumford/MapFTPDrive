@@ -143,7 +143,10 @@ func (s *Supervisor) run(ctx context.Context, e *entry, handle mount.Handle) {
 				s.log.Error("unmount", "drive", endpoint.DriveLetter, "error", err)
 			}
 			select {
-			case <-ended:
+			case waitErr := <-ended:
+				if waitErr != nil {
+					s.log.Warn("mount ended with an error after unmount", "drive", endpoint.DriveLetter, "error", waitErr)
+				}
 			case <-time.After(unmountWait):
 				s.log.Error("mount did not end after unmount", "drive", endpoint.DriveLetter)
 			}

@@ -129,7 +129,7 @@ func deleteCredentials() error {
 		}
 		return callErr
 	}
-	defer procCredFree.Call(uintptr(unsafe.Pointer(list)))
+	defer func() { _, _, _ = procCredFree.Call(uintptr(unsafe.Pointer(list))) }()
 	var failures []error
 	for _, item := range unsafe.Slice(list, count) {
 		ok, _, callErr := procCredDeleteW.Call(uintptr(unsafe.Pointer(item.TargetName)), uintptr(item.Type), 0)
@@ -177,7 +177,7 @@ func runInSession(session uint32, executable, argument string) error {
 	if err := windows.CreateEnvironmentBlock(&environment, token, false); err != nil {
 		return err
 	}
-	defer windows.DestroyEnvironmentBlock(environment)
+	defer func() { _ = windows.DestroyEnvironmentBlock(environment) }()
 	commandLine, err := windows.UTF16PtrFromString(syscall.EscapeArg(executable) + " " + argument)
 	if err != nil {
 		return err

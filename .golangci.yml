@@ -18,9 +18,11 @@ linters:
   settings:
     errcheck:
       exclude-functions:
-        # Releasing a Service Control Manager handle reports nothing the
-        # caller can act on, like the Close calls excluded below.
+        # Releasing a Service Control Manager handle or a Win32 handle
+        # reports nothing the caller can act on, like the Close calls
+        # excluded below.
         - (*golang.org/x/sys/windows/svc/mgr.Mgr).Disconnect
+        - golang.org/x/sys/windows.CloseHandle
     staticcheck:
       checks:
         - all

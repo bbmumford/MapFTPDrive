@@ -90,7 +90,7 @@ func ScanTLSCertificate(ctx context.Context, endpoint config.Endpoint) (Certific
 	}
 	client := tls.Client(connection, &tls.Config{
 		ServerName:         endpoint.Host,
-		InsecureSkipVerify: true, // the chain is verified below so an untrusted certificate can still be shown for pinning
+		InsecureSkipVerify: true, //nolint:gosec // G402: describeCertificate verifies the chain against the system roots; skipping it here lets an untrusted certificate still be shown for pinning, and no data is sent on this connection.
 	})
 	if err := client.HandshakeContext(ctx); err != nil {
 		return Certificate{}, fmt.Errorf("TLS handshake with %s: %w", address, err)

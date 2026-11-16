@@ -69,12 +69,13 @@ func Run(ctx context.Context, scope config.Scope) error {
 	}
 	layout := config.LayoutFor(path)
 	logger, logErr := logging.Open(logging.Options{Dir: layout.LogDir(), EventLog: scope == config.System})
+	if logErr != nil {
+		// Open still returns a logger writing to every output it could open.
+		logger.Warn("logging is incomplete", "error", logErr)
+	}
 	defer logger.Close()
 	slog.SetDefault(logger.Logger)
 	mount.RouteLogs(logger.Handler())
-	if logErr != nil {
-		logger.Warn("logging is incomplete", "error", logErr)
-	}
 
 	watcher := netwatch.New()
 	defer watcher.Close()

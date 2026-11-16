@@ -26,19 +26,6 @@ func (p walkPrompter) ask(title, message string, style walk.MsgBoxStyle) bool {
 	return <-answer
 }
 
-func (p walkPrompter) inform(title, message string, style walk.MsgBoxStyle) {
-	if p.owner == nil {
-		walk.MsgBox(nil, title, message, style)
-		return
-	}
-	done := make(chan struct{})
-	p.owner.Synchronize(func() {
-		walk.MsgBox(p.owner, title, message, style)
-		close(done)
-	})
-	<-done
-}
-
 func (p walkPrompter) ConfirmPlainFTP() bool {
 	return p.ask("Unencrypted connection", plainFTPPrompt, walk.MsgBoxIconWarning)
 }

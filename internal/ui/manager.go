@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"time"
 
 	"mapftpdrive/internal/config"
 	"mapftpdrive/internal/control"
@@ -25,9 +24,6 @@ type ManagerOptions struct {
 func ShowManager(options ManagerOptions) error {
 	return showManager(options)
 }
-
-// refreshInterval is how often the management window re-reads status.
-const refreshInterval = 2 * time.Second
 
 // fetchReports asks every host for status; a host that cannot be reached
 // contributes a report carrying the error so the window can say so.

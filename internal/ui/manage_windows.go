@@ -21,6 +21,9 @@ import (
 // sees.
 const actionTimeout = control.RequestTimeout
 
+// refreshInterval is how often the management window re-reads status.
+const refreshInterval = 2 * time.Second
+
 type rowModel struct {
 	walk.TableModelBase
 	rows []Row
@@ -186,7 +189,7 @@ func (m *manager) reload() {
 			if problems == "" && len(m.model.rows) == 0 {
 				problems = "No drives yet. Choose Map new drive… to add one."
 			}
-			m.status.SetText(problems)
+			_ = m.status.SetText(problems)
 		}
 		m.selectionChanged()
 	})
@@ -224,7 +227,7 @@ func (m *manager) selectionChanged() {
 		case ok && row.Status.Endpoint.Protocol == config.FTPS:
 			text = "Re-pin certificate…"
 		}
-		button.SetText(text)
+		_ = button.SetText(text)
 	}
 }
 
@@ -235,7 +238,7 @@ func (m *manager) run(progress string, action func(context.Context) (string, err
 		return
 	}
 	m.busy = true
-	m.status.SetText(progress)
+	_ = m.status.SetText(progress)
 	m.selectionChanged()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), actionTimeout)
@@ -243,10 +246,10 @@ func (m *manager) run(progress string, action func(context.Context) (string, err
 		cancel()
 		m.window.Synchronize(func() {
 			m.busy = false
-			m.status.SetText(message)
+			_ = m.status.SetText(message)
 			m.selectionChanged()
 			if err != nil && !errors.Is(err, ErrCancelled) {
-				m.status.SetText("")
+				_ = m.status.SetText("")
 				walk.MsgBox(m.window, "MapFTPDrive", err.Error(), walk.MsgBoxIconError)
 			}
 		})

@@ -82,14 +82,14 @@ func runMapperDialog(owner walk.Form, options MapperOptions) (MapperResult, erro
 		if editing {
 			label = strings.TrimSuffix(label, ":") + " (blank keeps it):"
 		}
-		passwordLabel.SetText(label)
+		_ = passwordLabel.SetText(label)
 		switch {
 		case protocol == config.FTP:
-			warningLabel.SetText("FTP sends credentials and data without encryption. Prefer SFTP or FTPS.")
+			_ = warningLabel.SetText("FTP sends credentials and data without encryption. Prefer SFTP or FTPS.")
 		case options.Scope == config.System:
-			warningLabel.SetText("System-wide drives are available to every user of this computer with these credentials.")
+			_ = warningLabel.SetText("System-wide drives are available to every user of this computer with these credentials.")
 		default:
-			warningLabel.SetText("")
+			_ = warningLabel.SetText("")
 		}
 	}
 	setBusy := func(state bool, message string) {
@@ -97,7 +97,7 @@ func runMapperDialog(owner walk.Form, options MapperOptions) (MapperResult, erro
 		for _, widget := range []walk.Widget{nameEdit, hostEdit, portEdit, userEdit, passwordEdit, pathEdit, protocolBox, driveBox, okButton} {
 			widget.SetEnabled(!state)
 		}
-		statusLabel.SetText(message)
+		_ = statusLabel.SetText(message)
 		refresh()
 	}
 	submit := func() {
@@ -172,7 +172,7 @@ func runMapperDialog(owner walk.Form, options MapperOptions) (MapperResult, erro
 						ColumnSpan:   2,
 						OnCurrentIndexChanged: func() {
 							next := protocolBox.CurrentIndex()
-							portEdit.SetText(NextPortText(portEdit.Text(), previousProtocol, next))
+							_ = portEdit.SetText(NextPortText(portEdit.Text(), previousProtocol, next))
 							previousProtocol = next
 							refresh()
 						},
@@ -199,7 +199,7 @@ func runMapperDialog(owner walk.Form, options MapperOptions) (MapperResult, erro
 						OnClicked: func() {
 							picker := walk.FileDialog{Title: "Choose the private key file", Filter: "All files (*.*)|*.*"}
 							if ok, _ := picker.ShowOpen(dialog); ok {
-								keyEdit.SetText(picker.FilePath)
+								_ = keyEdit.SetText(picker.FilePath)
 							}
 						},
 					},

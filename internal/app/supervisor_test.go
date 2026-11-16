@@ -368,7 +368,7 @@ func TestMapTestsMountsThenSaves(t *testing.T) {
 		t.Fatal("credential not stored")
 	}
 	knownHosts := config.LayoutFor(h.store.Path()).KnownHostsFile(mapped.ID)
-	if data, err := os.ReadFile(knownHosts); err != nil || strings.TrimSpace(string(data)) != h.hostKey.Line {
+	if data, err := os.ReadFile(knownHosts); err != nil || strings.TrimSpace(string(data)) != h.hostKey.Line { //nolint:gosec // G304: the test store's own known_hosts file.
 		t.Fatalf("known_hosts = %q, %v", data, err)
 	}
 	if h.engine.mountCount() != 1 {

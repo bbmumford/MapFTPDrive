@@ -22,7 +22,9 @@ func startServer(t *testing.T, scope config.Scope, handler Handler) {
 	go func() { served <- Serve(ctx, scope, handler) }()
 	t.Cleanup(func() {
 		cancel()
-		<-served
+		if err := <-served; err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
 	})
 	select {
 	case err := <-served:

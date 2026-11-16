@@ -66,7 +66,7 @@ func (f *fakeTransport) Call(ctx context.Context, _ config.Scope, request contro
 		return control.Response{}, errors.New("pipe not found")
 	}
 	var decoded control.Request
-	data, _ := json.Marshal(request)
+	data, _ := json.Marshal(request) //nolint:gosec // G117: the fake transport round-trips the request in memory, as the pipe carries it.
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return control.Response{}, err
 	}

@@ -40,8 +40,8 @@ func TestRotatingKeepsBoundedFiles(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("files = %v", entries)
 	}
-	current, _ := os.ReadFile(path)
-	newest, _ := os.ReadFile(path + ".1")
+	current, _ := os.ReadFile(path)       //nolint:gosec // G304: the test's own log file.
+	newest, _ := os.ReadFile(path + ".1") //nolint:gosec // G304: the test's own rotated log file.
 	if !strings.Contains(string(current), "line 19") || len(current) > 100 || len(newest) > 100 {
 		t.Fatalf("current %q newest %q", current, newest)
 	}
@@ -67,7 +67,7 @@ func TestOpenWritesFileAndReportsMissingEventLog(t *testing.T) {
 	if err := logger.Close(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	data, err := os.ReadFile(filepath.Join(dir, FileName)) //nolint:gosec // G304: the test's own log file.
 	if err != nil {
 		t.Fatal(err)
 	}

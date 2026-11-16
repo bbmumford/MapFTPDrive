@@ -372,7 +372,7 @@ func TestProbeAndMountThroughEngine(t *testing.T) {
 	engine := NewEngine(Options{CacheDir: t.TempDir()})
 	endpoint := testEndpoint(config.FTPS)
 	endpoint.Host = "127.0.0.1"
-	endpoint.Port = uint16(port)
+	endpoint.Port = uint16(port) //nolint:gosec // G115: a TCP port from the listener's own address fits in 16 bits.
 	endpoint.TLSMode = config.TLSImplicit
 	endpoint.CertificatePin = security.CertificateSHA256(server.certificate)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

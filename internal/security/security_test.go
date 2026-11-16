@@ -39,7 +39,7 @@ func endpointFor(t *testing.T, listener net.Listener, protocol config.Protocol) 
 		t.Fatal(err)
 	}
 	port, _ := strconv.Atoi(portText)
-	return config.Endpoint{Host: host, Port: uint16(port), Protocol: protocol, Username: "probe"}
+	return config.Endpoint{Host: host, Port: uint16(port), Protocol: protocol, Username: "probe"} //nolint:gosec // G115: a TCP port from the listener's own address fits in 16 bits.
 }
 
 func newSigner(t *testing.T) ssh.Signer {
